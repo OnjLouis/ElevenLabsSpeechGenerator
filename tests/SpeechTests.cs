@@ -132,6 +132,7 @@ namespace ElevenLabsSpeechGenerator
         }
         private static void RunChecks()
         {
+            TestStartupArguments();
             TestSpeechTags();
             var owned = new NamedItem { Id = "owned", Name = "Owned", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", true } } };
             var sharedVoice = new NamedItem { Id = "shared", Name = "Shared", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", false } } };
@@ -211,6 +212,16 @@ namespace ElevenLabsSpeechGenerator
             Check(Transcript.Subtitles(malformed) == "1\r\n00:00:01,000 --> 00:00:02,000\r\nValid\r\n\r\n", "Malformed timestamps must not interrupt valid subtitle export");
             count += ApiTests.Run();
             Console.WriteLine("Passed " + count + " speech-domain checks.");
+        }
+
+        private static void TestStartupArguments()
+        {
+            var parser = typeof(Program).GetMethod("InitialDocument", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+            Func<string[], string> parse = args => (string)parser.Invoke(null, new object[] { args });
+            Check(parse(new[] { "--cleanup-update", "update staging" }) == null, "Updater cleanup folder was interpreted as a project");
+            Check(parse(new[] { "--cleanup-update", "update staging", "project.speech.json" }) == "project.speech.json", "Cleanup consumed a real project argument");
+            Check(parse(new[] { "--CLEANUP-UPDATE", "update staging" }) == null, "Cleanup option must be case insensitive");
+            Check(parse(new string[0]) == null && parse(new[] { "project.speech.json" }) == "project.speech.json", "Normal document startup changed");
         }
         private static void TestContextHelp()
         {
