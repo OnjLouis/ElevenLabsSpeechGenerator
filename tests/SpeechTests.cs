@@ -112,6 +112,7 @@ namespace ElevenLabsSpeechGenerator
                     try
                     {
                         Check(form.Owner == owner && !form.ShowInTaskbar, "Tag picker must remain an owned dialog");
+                        CheckHelpCoverage(form);
                         var controls = Descendants(form).ToArray();
                         var keys = controls.Where(x => x.Text.Contains("&") && (x is System.Windows.Forms.Button || x is System.Windows.Forms.Label)).Select(x => char.ToLowerInvariant(x.Text[x.Text.IndexOf('&') + 1])).ToArray();
                         Check(keys.Distinct().Count() == keys.Length, "Tag picker mnemonics collide");
@@ -130,9 +131,46 @@ namespace ElevenLabsSpeechGenerator
                 owner.Close();
             }
         }
+        private static void TestCloneDialog()
+        {
+            Exception failure = null;
+            using (var owner = new System.Windows.Forms.Form())
+            using (var timer = new System.Windows.Forms.Timer { Interval = 50 })
+            {
+                owner.Show();
+                timer.Tick += delegate
+                {
+                    var form = System.Windows.Forms.Application.OpenForms.Cast<System.Windows.Forms.Form>().FirstOrDefault(x => x.Text == "Clone voice");
+                    if (form == null) return;
+                    timer.Stop();
+                    try
+                    {
+                        var controls = Descendants(form).ToArray();
+                        var keys = controls.Where(x => x.Text.Contains("&") && (x is System.Windows.Forms.Button || x is System.Windows.Forms.Label || x is System.Windows.Forms.CheckBox)).Select(x => char.ToLowerInvariant(x.Text[x.Text.IndexOf('&') + 1])).ToArray();
+                        Check(keys.Distinct().Count() == keys.Length, "Clone dialog mnemonics collide");
+                        Check(controls.OfType<System.Windows.Forms.TextBox>().Any(x => x.AccessibleName == "Clone status" && x.ReadOnly && x.TabStop), "Clone upload needs a readable status control");
+                        Check(controls.OfType<System.Windows.Forms.Button>().Any(x => x.Text == "Cancel &upload"), "Clone upload needs a separate cancel command");
+                        CheckHelpCoverage(form);
+                        var add = controls.OfType<System.Windows.Forms.Button>().Single(x => x.Text == "&Add audio files...");
+                        var remove = controls.OfType<System.Windows.Forms.Button>().Single(x => x.Text == "&Remove sample");
+                        var consent = controls.OfType<System.Windows.Forms.CheckBox>().Single();
+                        Check(ContextHelp.Description(add).Contains("recordings") && ContextHelp.Description(remove).Contains("without deleting"), "Clone Add and Remove must explain their different effects");
+                        Check(ContextHelp.Description(consent).Contains("speaker") && ContextHelp.Description(consent) != ContextHelp.Description(add), "Clone consent must explain permission, not sample selection");
+                        Check(ContextHelp.Description(controls.Single(x => x.AccessibleName == "Voice description")).Contains("Optional"), "Clone description must not explain voice design");
+                    }
+                    catch (Exception ex) { failure = ex; }
+                    finally { form.Close(); }
+                };
+                timer.Start(); ToolDialogs.Clone(owner, new SpeechClient("test", "http://127.0.0.1:1"));
+                owner.Close();
+            }
+            if (failure != null) throw failure;
+        }
         private static void RunChecks()
         {
             TestStartupArguments();
+            TestCloneDialog();
+            count += LongSpeechTests.Run();
             TestSpeechTags();
             var owned = new NamedItem { Id = "owned", Name = "Owned", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", true } } };
             var sharedVoice = new NamedItem { Id = "shared", Name = "Shared", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", false } } };
@@ -225,6 +263,12 @@ namespace ElevenLabsSpeechGenerator
         }
         private static void TestContextHelp()
         {
+            using (var preferences = new PreferencesForm(new AppSettings())) CheckHelpCoverage(preferences);
+            using (var main = new MainForm(null)) CheckHelpCoverage(main);
+            foreach (var kind in new[] { "Voices", "History", "Dictionaries" })
+                using (var playback = new Playback())
+                using (var catalog = new CatalogForm(kind, new SpeechClient("test", "http://127.0.0.1:1"), new AppSettings(), playback, new SpeechProject()))
+                    CheckHelpCoverage(catalog);
             using (var main = new MainForm(null))
             using (var owner = Ui.Dialog("Preferences", new System.Drawing.Size(600, 400)))
             using (var timer = new System.Windows.Forms.Timer { Interval = 50 })
@@ -257,6 +301,14 @@ namespace ElevenLabsSpeechGenerator
                 if (failure != null) throw failure;
                 Check(key.Focused, "Closing help must restore its original focused control.");
                 owner.Close(); main.Close();
+            }
+        }
+        private static void CheckHelpCoverage(System.Windows.Forms.Control container)
+        {
+            foreach (var control in Descendants(container).Where(x => x is System.Windows.Forms.ButtonBase || x is System.Windows.Forms.TextBox || x is System.Windows.Forms.ComboBox || x is System.Windows.Forms.ListBox || x is System.Windows.Forms.NumericUpDown || x is System.Windows.Forms.LinkLabel || x is System.Windows.Forms.TabControl))
+            {
+                var help = ContextHelp.Description(control);
+                Check(!help.Contains("additional description") && !help.Contains("full workflow") && !help.Contains("Use this control"), "Missing specific context help: " + container.Text + " / " + ContextHelp.ControlName(control));
             }
         }
         private static void TestResultAccessibility()
@@ -545,6 +597,7 @@ namespace ElevenLabsSpeechGenerator
                     try
                     {
                         var text = Descendants(form).OfType<System.Windows.Forms.TextBox>().First(x => x.AccessibleName == "Text for this line");
+                        CheckHelpCoverage(form);
                         Check(text.Text == SpeechProject.WindowsLines(p.Dialogue[0].Text), "Opening dialogue overwrote the first line");
                         var ok = Descendants(form).OfType<System.Windows.Forms.Button>().First(x => x.Text == "&OK"); ok.PerformClick();
                     }
@@ -560,6 +613,7 @@ namespace ElevenLabsSpeechGenerator
             using (var dubbing = new DubbingForm(new SpeechClient("fixture-not-a-key"), AppPaths.AppFolder, path => { }))
             {
                 dubbing.Show(); System.Windows.Forms.Application.DoEvents();
+                CheckHelpCoverage(dubbing);
                 Check(!dubbing.ShowInTaskbar, "Dubbing must belong to its parent rather than add a taskbar window");
                 var controls = Descendants(dubbing).ToArray();
                 var status = controls.OfType<System.Windows.Forms.TextBox>().First(x => x.AccessibleName == "Dubbing status");

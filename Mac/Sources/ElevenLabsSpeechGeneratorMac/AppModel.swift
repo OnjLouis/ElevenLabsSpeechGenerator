@@ -22,6 +22,9 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
     @Published var sharedVoices = false
     @Published var dubbingJob = DubbingJob()
     @Published var dubbingStatus = "Ready."
+    @Published var cloneStatus = "Ready. Add samples and confirm consent before creating a voice."
+    @Published var cloneCreated = false
+    var cloneUploading = false
     @Published var notice: String?
     private var task: Task<Void, Never>?
     private var balanceTask: Task<Void, Never>?
@@ -71,7 +74,12 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
         }
     }
     var selectedModel: CatalogItem? { availableModels.first { $0.id == project.modelId } }
-    var textLimit: Int { project.mode.previewsVoice ? 1000 : project.mode == .forcedAlignment ? 675000 : selectedModel?.data["maximum_text_length_per_request"] as? Int ?? 10000 }
+    var requestLimit: Int { project.mode.previewsVoice ? 1000 : project.mode == .forcedAlignment ? 675000 : LongSpeech.modelLimit(selectedModel, id: project.modelId) }
+    var textLimit: Int { project.mode == .textToSpeech && preferences.allowLongSpeech == true ? LongSpeech.maximumCharacters : requestLimit }
+    var windowTitle: String {
+        let count = project.mode == .dialogue ? project.dialogue.reduce(0) { $0 + $1.text.utf16.count } : project.text.utf16.count
+        return "ElevenLabs Speech Generator - " + (project.mode == .transcription ? "\(count) characters" : "\(count) / \(project.mode == .dialogue ? 2000 : textLimit) characters")
+    }
     func switchMode(_ mode: SpeechMode) {
         guard !busy else { return }
         drafts[String(project.mode.rawValue)] = project
@@ -144,15 +152,28 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
         guard !busy else { return }
         do { try project.validate(limit: textLimit); try SpeechFiles.validateOutputFolder(preferences.outputFolder) } catch { showResult("Cannot generate", error.localizedDescription); return }
         let p = project, model = selectedModel
+        let limit = requestLimit, longSpeech = p.mode == .textToSpeech && preferences.allowLongSpeech == true && p.text.utf16.count > requestLimit
+        var partCount = 1
+        do { if longSpeech { partCount = try LongSpeech.split(p.text, limit: limit).count } } catch { showResult("Cannot generate", error.localizedDescription); return }
         let folder = SpeechFiles.generationFolder(root: URL(fileURLWithPath: preferences.outputFolder), mode: p.mode, voiceName: voices.first { $0.id == p.voiceId }?.name ?? p.voiceId)
         let total = p.mode.choosesFormat ? p.variations : 1
-        guard confirm("Confirm generation", "Generate \(total) \(p.mode.title.lowercased()) request(s)? This sends your text or audio to ElevenLabs and may spend credits.") else { return }
+        var confirmation = "Generate \(total * partCount) \(p.mode.title.lowercased()) request(s)? This sends your text or audio to ElevenLabs and may spend credits."
+        if longSpeech { confirmation += "\n\nEach variation will use \(partCount) parts in your chosen format and be saved as one WAV at \(LongSpeech.sampleRate(p.outputFormat)) Hz. Verified parts from an identical unfinished job will be reused. An interrupted request already accepted by ElevenLabs may still have incurred a charge; the app does not retry it automatically." }
+        guard confirm("Confirm generation", confirmation) else { return }
         stop()
         run("Generating \(p.mode.title.lowercased())") {
             var newAudio: [URL] = []
             defer { self.refreshBalance(); self.flushDrafts() }
             let api = try self.service(), start = Date()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            if longSpeech {
+                let stem = SpeechFiles.stem(p.filename.isEmpty ? p.text.split(whereSeparator: \.isWhitespace).prefix(8).joined(separator: " ") : p.filename)
+                newAudio = try await LongSpeech.generate(p, model: model, folder: folder, stem: stem, limit: limit, progress: { self.log($0) }, generate: { part, context in try await api.generate(part, model: model, context: context) })
+                for url in newAudio {
+                    self.addOutput(url)
+                    if self.preferences.includeDetails { try self.saveDetails(folder, stem: url.deletingPathExtension().lastPathComponent, data: ["project": try Self.object(SpeechFiles.json(p)), "assembled_wav": true, "generated_utc": ISO8601DateFormatter().string(from: Date())]) }
+                }
+            } else {
             for i in 1...total {
                 try Task.checkCancellation(); let one = Date()
                 let r = try await api.generate(p, model: model)
@@ -184,6 +205,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
                     if self.preferences.includeDetails { try self.saveDetails(folder, stem: url.deletingPathExtension().lastPathComponent, data: ["project": try Self.object(SpeechFiles.json(p)), "request_id": r.requestId, "generated_utc": ISO8601DateFormatter().string(from: Date())]) }
                 }
                 self.log("Request \(i) completed in \(String(format: "%.1f", Date().timeIntervalSince(one))) seconds.")
+            }
             }
             self.log("Generation complete. Elapsed: \(String(format: "%.1f", Date().timeIntervalSince(start))) seconds.")
             if let app = NSApp { NSAccessibility.post(element: app.mainWindow ?? app, notification: .announcementRequested, userInfo: [.announcement: "Generation complete", .priority: NSAccessibilityPriorityLevel.high.rawValue]) }
@@ -249,7 +271,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
             let (data, response) = try await URLSession.shared.data(from: URL(string: "https://api.github.com/repos/OnjLouis/ElevenLabsSpeechGenerator/releases?per_page=100")!)
             if (response as? HTTPURLResponse)?.statusCode == 404 { if !automatic { showResult("Check for updates", "No update is currently available.") }; return }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SpeechError.response("The update service is unavailable. Please try again later.") }
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0"
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0"
             guard let r = try ReleaseCatalog.newerMacRelease(in: data, currentVersion: version) else { if !automatic { showResult("Check for updates", "The app is up to date.") }; return }
             guard !busy && tool != .dubbing else { if !automatic { showResult("Update postponed", "Finish the active request and close Automatic Dubbing before installing an update.") }; return }
             if automatic && preferences.installUpdatesSilently || confirm("Update available", "Version \(r.version) is available. Download, verify and install it, then reopen the app?") { busy = true; defer { busy = false }; flushDrafts(); try await MacUpdateInstaller.start(r) }

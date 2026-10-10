@@ -14,7 +14,17 @@ final class BoundedResponse: NSObject, URLSessionDataDelegate, @unchecked Sendab
     private var tooLarge = false
     private var data = Data()
     private var response: URLResponse?
-    init(limit: Int) { self.limit = limit }
+    private var lastUploadPercent = -1
+    private let uploadProgress: (@Sendable (String) -> Void)?
+    init(limit: Int, uploadProgress: (@Sendable (String) -> Void)? = nil) { self.limit = limit; self.uploadProgress = uploadProgress }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
+        guard totalBytesExpectedToSend > 0 else { return }
+        let percent = Int(min(100, totalBytesSent * 100 / totalBytesExpectedToSend))
+        if percent / 5 != lastUploadPercent / 5 || percent == 100 {
+            lastUploadPercent = percent
+            uploadProgress?(percent == 100 ? "Upload sent. Waiting for ElevenLabs to create the voice..." : "Sending samples: \(percent)% of upload data.")
+        }
+    }
     func receive(_ request: URLRequest, upload: URL?, configuration: URLSessionConfiguration) async throws -> (Data, URLResponse) {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -60,7 +70,7 @@ final class SpeechService {
     func get(_ path: String) async throws -> Data { try await send("GET", path: path).data }
     func post(_ path: String, body: [String: Any]) async throws -> Data { try await send("POST", path: path, body: JSONSerialization.data(withJSONObject: body)).data }
     func delete(_ path: String) async throws { _ = try await send("DELETE", path: path) }
-    func generate(_ p: SpeechProject, model: CatalogItem?) async throws -> SpeechResult {
+    func generate(_ p: SpeechProject, model: CatalogItem?, context: [String: Any] = [:]) async throws -> SpeechResult {
         let suffix = "?output_format=\(p.outputFormat)"
         if p.mode == .voiceIsolation { return try await upload("/v1/audio-isolation", fields: ["file_format": "other"], files: [("audio", URL(fileURLWithPath: p.inputFile))]) }
         if p.mode == .forcedAlignment { return try await upload("/v1/forced-alignment", fields: ["text": p.text], files: [("file", URL(fileURLWithPath: p.inputFile))]) }
@@ -71,9 +81,12 @@ final class SpeechService {
             return try await upload(p.mode == .transcription ? "/v1/speech-to-text" : "/v1/speech-to-speech/\(escape(p.voiceId))\(suffix)", fields: fields, files: [(p.mode == .transcription ? "file" : "audio", URL(fileURLWithPath: p.inputFile))])
         }
         let path = p.mode == .dialogue ? "/v1/text-to-dialogue" : p.mode == .voiceDesign ? "/v1/text-to-voice/design" : p.mode == .voiceRemix ? "/v1/text-to-voice/\(escape(p.voiceId))/remix" : "/v1/text-to-speech/\(escape(p.voiceId))"
-        return try await send("POST", path: path + suffix, body: JSONSerialization.data(withJSONObject: p.body(model: model)))
+        var body = p.body(model: model)
+        if p.mode == .textToSpeech { for (key, value) in context { body[key] = value } }
+        return try await send("POST", path: path + suffix, body: JSONSerialization.data(withJSONObject: body))
     }
-    func upload(_ path: String, fields: [String: String], files: [(String, URL)]) async throws -> SpeechResult {
+    func upload(_ path: String, fields: [String: String], files: [(String, URL)], progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
+        progress?("Preparing voice samples for upload...")
         let boundary = "Speech\(UUID().uuidString)", temp = FileManager.default.temporaryDirectory.appendingPathComponent("SpeechUpload-\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: temp.path, contents: nil) else { throw SpeechError.response("Could not stage the upload.") }
         defer { try? FileManager.default.removeItem(at: temp) }
@@ -93,14 +106,15 @@ final class SpeechService {
             }
             try write("--\(boundary)--\r\n"); try writer.close()
         } catch { try? writer.close(); throw error }
-        return try await send("POST", path: path, upload: temp, contentType: "multipart/form-data; boundary=\(boundary)")
+        progress?("Sending voice samples...")
+        return try await send("POST", path: path, upload: temp, contentType: "multipart/form-data; boundary=\(boundary)", progress: progress)
     }
-    private func send(_ method: String, path: String, body: Data? = nil, upload: URL? = nil, contentType: String = "application/json") async throws -> SpeechResult {
+    private func send(_ method: String, path: String, body: Data? = nil, upload: URL? = nil, contentType: String = "application/json", progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
         guard !key.isEmpty, !key.contains("\r"), !key.contains("\n") else { throw SpeechError.validation("Enter a valid API key in Settings first.") }
         var r = URLRequest(url: URL(string: path, relativeTo: origin)!.absoluteURL); r.httpMethod = method; r.timeoutInterval = 600
-        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.0.0", forHTTPHeaderField: "User-Agent")
+        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.1.0", forHTTPHeaderField: "User-Agent")
         if body != nil || upload != nil { r.setValue(contentType, forHTTPHeaderField: "Content-Type") }; r.httpBody = body
-        let result = try await BoundedResponse(limit: 256 * 1024 * 1024).receive(r, upload: upload, configuration: configuration)
+        let result = try await BoundedResponse(limit: 256 * 1024 * 1024, uploadProgress: progress).receive(r, upload: upload, configuration: configuration)
         try Task.checkCancellation()
         guard let response = result.1 as? HTTPURLResponse else { throw SpeechError.response("No response was received.") }
         guard (200..<300).contains(response.statusCode) else {

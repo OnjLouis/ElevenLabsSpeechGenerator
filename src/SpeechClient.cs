@@ -30,6 +30,7 @@ namespace ElevenLabsSpeechGenerator
         public string Get(string path, CancellationToken token) { return Send("GET", path, null, null, null, null, 0, token).Json; }
         public string Post(string path, object body, CancellationToken token) { return Send("POST", path, body, null, null, null, 0, token).Json; }
         public string Upload(string path, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token) { return Send("POST", path, null, fields, files, null, 0, token).Json; }
+        public string Upload(string path, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token, Action<string> progress) { return Send("POST", path, null, fields, files, null, 0, token, progress).Json; }
         public ApiResult Download(string path, string output, CancellationToken token) { return Send("GET", path, null, null, null, output, 0, token); }
         public void Delete(string path, CancellationToken token) { Send("DELETE", path, null, null, null, null, 0, token); }
         internal static string PreviewExtension(Dictionary<string, object> preview)
@@ -44,7 +45,7 @@ namespace ElevenLabsSpeechGenerator
             if (header.Length >= 3 && (Encoding.ASCII.GetString(header, 0, 3) == "ID3" || header[0] == 255 && (header[1] & 0xe0) == 0xe0 && (header[1] & 6) == 2 && (header[1] & 0x18) != 8 && (header[2] & 0xf0) != 0xf0)) return ".mp3";
             return DubbingService.LosslessExtension(header);
         }
-        public ApiResult Generate(SpeechProject p, NamedItem model, string output, CancellationToken token)
+        public ApiResult Generate(SpeechProject p, NamedItem model, string output, CancellationToken token, Dictionary<string, object> context = null)
         {
             if (p.Mode == SpeechMode.VoiceIsolation || p.Mode == SpeechMode.ForcedAlignment)
                 return Send("POST", p.Mode == SpeechMode.VoiceIsolation ? "/v1/audio-isolation" : "/v1/forced-alignment", null,
@@ -69,9 +70,11 @@ namespace ElevenLabsSpeechGenerator
                 return Send("POST", path, null, fields, files, p.Mode == SpeechMode.Transcription ? null : output, channels, token);
             }
             path = p.Mode == SpeechMode.Dialogue ? "/v1/text-to-dialogue" : p.Mode == SpeechMode.VoiceDesign ? "/v1/text-to-voice/design" : p.Mode == SpeechMode.VoiceRemix ? "/v1/text-to-voice/" + Uri.EscapeDataString(p.VoiceId) + "/remix" : "/v1/text-to-speech/" + Uri.EscapeDataString(p.VoiceId);
-            return Send("POST", path + suffix, p.JsonBody(model), null, null, p.Mode == SpeechMode.VoiceDesign || p.Mode == SpeechMode.VoiceRemix ? null : output, channels, token);
+            var body = p.JsonBody(model);
+            if (p.Mode == SpeechMode.TextToSpeech && context != null) foreach (var item in context) body.Add(item.Key, item.Value);
+            return Send("POST", path + suffix, body, null, null, p.Mode == SpeechMode.VoiceDesign || p.Mode == SpeechMode.VoiceRemix ? null : output, channels, token);
         }
-        private ApiResult Send(string method, string path, object body, Dictionary<string, string> fields, List<UploadFile> files, string output, int channels, CancellationToken token)
+        private ApiResult Send(string method, string path, object body, Dictionary<string, string> fields, List<UploadFile> files, string output, int channels, CancellationToken token, Action<string> progress = null)
         {
             if (key.Length == 0) throw new InvalidOperationException("Enter an API key in Preferences first.");
             token.ThrowIfCancellationRequested(); var request = ApiTransport.Create(origin + path, method, key, Timeout); string temp = null;
@@ -79,12 +82,13 @@ namespace ElevenLabsSpeechGenerator
             {
                 try
                 {
-                    if (fields != null) WriteMultipart(request, fields, files, token);
+                    if (fields != null) WriteMultipart(request, fields, files, token, progress);
                     else if (body != null)
                     {
                         var data = Encoding.UTF8.GetBytes(JsonData.Encode(body)); request.ContentType = "application/json"; request.ContentLength = data.Length;
                         using (var stream = request.GetRequestStream()) stream.Write(data, 0, data.Length);
                     }
+                    if (progress != null) progress(CurlTransport.UseForCurrentSystem ? "Sending samples and waiting for ElevenLabs to create the voice..." : "Upload sent. Waiting for ElevenLabs to create the voice...");
                     using (var response = request.GetResponse()) using (var stream = response.GetResponseStream())
                     {
                         var result = new ApiResult { RequestId = response.Headers["request-id"] };
@@ -130,7 +134,7 @@ namespace ElevenLabsSpeechGenerator
                 finally { if (temp != null && File.Exists(temp)) File.Delete(temp); }
             }
         }
-        private static void WriteMultipart(IApiRequest request, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token)
+        private static void WriteMultipart(IApiRequest request, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token, Action<string> progress)
         {
             var boundary = "Speech" + Guid.NewGuid().ToString("N"); request.ContentType = "multipart/form-data; boundary=" + boundary;
             var parts = new List<byte[]>(); long length = 0;
@@ -146,8 +150,29 @@ namespace ElevenLabsSpeechGenerator
             if (CurlTransport.UseForCurrentSystem && request.ContentLength > 25L * 1024 * 1024) throw new InvalidDataException("On Windows 7, select an upload smaller than 25 MB.");
             using (var stream = request.GetRequestStream())
             {
+                long sampleBytes = files.Sum(x => new FileInfo(x.Path).Length), sent = 0; int lastPercent = -1;
                 foreach (var bytes in parts) stream.Write(bytes, 0, bytes.Length);
-                for (int i = 0; i < files.Count; i++) { stream.Write(headers[i], 0, headers[i].Length); using (var file = File.OpenRead(files[i].Path)) Copy(file, stream, 500L * 1024 * 1024, token); stream.WriteByte(13); stream.WriteByte(10); }
+                for (int i = 0; i < files.Count; i++)
+                {
+                    stream.Write(headers[i], 0, headers[i].Length);
+                    using (var file = File.OpenRead(files[i].Path))
+                    {
+                        var buffer = new byte[65536]; int n; long fileBytes = 0;
+                        while ((n = file.Read(buffer, 0, buffer.Length)) > 0)
+                        {
+                            token.ThrowIfCancellationRequested(); fileBytes += n;
+                            if (fileBytes > 500L * 1024 * 1024) throw new InvalidDataException("Select an audio file smaller than 500 MB.");
+                            stream.Write(buffer, 0, n); sent += n;
+                            int percent = sampleBytes == 0 ? 100 : (int)Math.Min(100, sent * 100 / sampleBytes);
+                            if (progress != null && percent / 5 != lastPercent / 5)
+                            {
+                                lastPercent = percent;
+                                progress((CurlTransport.UseForCurrentSystem ? "Preparing upload: " : "Sending samples: ") + percent + "% of sample data.");
+                            }
+                        }
+                    }
+                    stream.WriteByte(13); stream.WriteByte(10);
+                }
                 stream.Write(end, 0, end.Length);
             }
         }

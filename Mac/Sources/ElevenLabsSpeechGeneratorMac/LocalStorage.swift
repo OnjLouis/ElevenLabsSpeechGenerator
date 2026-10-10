@@ -9,6 +9,7 @@ struct AppPreferences: Codable, Equatable {
     var installUpdatesSilently = false
     var playbackDevice = ""
     var autoPlayGenerations: Bool? = false
+    var allowLongSpeech: Bool? = false
     var voiceGroup: String? = "All voices"
     var defaultOutputFormat: String? = "mp3_44100_128"
     var resolvedOutputFormat: String { SpeechProject.formats.contains(defaultOutputFormat ?? "") ? defaultOutputFormat! : "mp3_44100_128" }

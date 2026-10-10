@@ -5,7 +5,7 @@ import SwiftUI
     @StateObject private var model = AppModel()
     @Environment(\.openSettings) private var openSettings
     var body: some Scene {
-        Window("ElevenLabs Speech Generator", id: "main") {
+        Window(model.windowTitle, id: "main") {
             MainView(model: model).frame(minWidth: 780, minHeight: 720)
                 .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in model.shutdown() }
         }.commands {

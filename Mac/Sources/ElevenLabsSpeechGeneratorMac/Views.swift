@@ -20,7 +20,7 @@ struct MainView: View {
                 Picker("Model", selection: $model.project.modelId) { ForEach(model.availableModels) { Text($0.name).tag($0.id) } }.accessibilityHint("Choose the speech model.")
                 if model.project.mode.choosesFormat {
                     Picker("Output Format", selection: $model.project.outputFormat) { ForEach(SpeechProject.formats, id: \.self) { Text($0).tag($0) } }.accessibilityHint("Choose MP3 or a PCM WAV sample rate. Some formats require a higher subscription tier.")
-                    Stepper("Variations: \(model.project.variations)", value: $model.project.variations, in: 1...10).accessibilityHint("Number of separate generations.")
+                    VariationsField(count: $model.project.variations)
                 } else if model.project.mode == .voiceIsolation { Text("Output: service-supplied audio") }
             }.disabled(model.busy)
             nativeText($model.balance, name: "Credit balance", hint: "Command+B. Remaining balance and credit usage.", editable: false, height: 70, ready: { model.balanceView = $0 })
@@ -63,6 +63,20 @@ struct MainView: View {
     }
 }
 
+private struct VariationsField: View {
+    @Binding var count: Int
+
+    var body: some View {
+        HStack {
+            Text("Variations")
+            TextField("Variations", value: $count, format: .number)
+                .frame(width: 90)
+                .accessibilityLabel("Number of variations")
+                .accessibilityHint("Number of separate generations, from 1 to 10.")
+        }
+    }
+}
+
 struct SettingsView: View {
     @State private var devices: [CatalogItem] = []
     @ObservedObject var model: AppModel
@@ -74,6 +88,8 @@ struct SettingsView: View {
                 HStack { TextField("Default Output Folder", text: $model.preferences.outputFolder).accessibilityHint("Choose where generated audio and transcripts are saved."); Button("Browse...") { let p = NSOpenPanel(); p.canChooseDirectories = true; p.canChooseFiles = false; if p.runModal() == .OK, let url = p.url { model.preferences.outputFolder = url.path; model.preferences.save() } }.accessibilityHint("Select the default output folder.") }
                 Toggle("Save Generation Details", isOn: $model.preferences.includeDetails).accessibilityHint("Save reusable JSON details in the Details subfolder.")
                 Toggle("Play a Completion Sound", isOn: $model.preferences.completionSound).accessibilityHint("Play a sound when a batch finishes.")
+                Toggle("Allow long speech text (split into parts)", isOn: Binding(get: { model.preferences.allowLongSpeech == true }, set: { model.preferences.allowLongSpeech = $0 }))
+                    .accessibilityHint("Generate Text to speech of up to 500,000 characters in sentence-aware parts, assembled into one WAV per variation. Each new part spends credits.")
             }.padding()
             },
             .init("API key") {

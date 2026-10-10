@@ -14,7 +14,7 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class AppVersion
     {
-        public const string Short = "1.0.0";
+        public const string Short = "1.1.0";
         public const string Full = Short + ".0";
     }
 }

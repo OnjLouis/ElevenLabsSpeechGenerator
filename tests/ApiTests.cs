@@ -58,6 +58,10 @@ namespace ElevenLabsSpeechGenerator
                 Check(request.Contains("/v1/text-to-dialogue?"), "Wrong dialogue endpoint"); var d = JsonData.Object(body); Check(d.ContainsKey("inputs") && d.ContainsKey("settings") && !d.ContainsKey("voice_settings"), "Wrong dialogue payload");
             });
             p.InputFile = Path.Combine(folder, "input.wav"); File.WriteAllBytes(p.InputFile, new byte[80]); p.Mode = SpeechMode.Transcription; p.ModelId = "scribe_v2";
+            var cloneProgress = new List<string>();
+            Serve(c => c.Upload("/v1/voices/add", new Dictionary<string, string> { { "name", "Fixture clone" } }, new List<UploadFile> { new UploadFile("files", p.InputFile) }, CancellationToken.None, cloneProgress.Add), "application/json", Encoding.UTF8.GetBytes("{\"voice_id\":\"fixture\"}"), (request, body) =>
+                Check(request.Contains("/v1/voices/add ") && body.Contains("Fixture clone") && body.Contains("name=\"files\""), "Clone upload lost its fields or samples"));
+            Check(cloneProgress.Exists(x => x.Contains("100%")) && cloneProgress[cloneProgress.Count - 1].Contains("Waiting for ElevenLabs"), "Clone progress must distinguish upload completion from server processing");
             Serve(c => { var result = c.Generate(p, null, path, CancellationToken.None); Check(JsonData.String(JsonData.Object(result.Json), "text") == "Transcript", "Transcript was not returned as JSON"); }, "application/json", Encoding.UTF8.GetBytes("{\"text\":\"Transcript\"}"), (request, body) =>
             {
                 Check(request.Contains("/v1/speech-to-text "), "Wrong transcription endpoint"); Check(body.Contains("name=\"file\"") && body.Contains("name=\"diarize\"") && body.Contains("timestamps_granularity") && body.Contains("scribe_v2"), "Missing multipart transcription fields");

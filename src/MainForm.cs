@@ -204,11 +204,11 @@ namespace ElevenLabsSpeechGenerator
         {
             if (project.Mode == SpeechMode.VoiceDesign || project.Mode == SpeechMode.VoiceRemix) return 1000;
             if (project.Mode == SpeechMode.ForcedAlignment) return 675000;
-            var selected = model.SelectedItem as NamedItem; int limit;
-            return selected != null && int.TryParse(JsonData.String(selected.Data, "maximum_text_length_per_request"), out limit) && limit > 0 ? limit : 10000;
+            return LongSpeech.ModelLimit(model.SelectedItem as NamedItem, project.ModelId);
         }
-        private void ApplyLimits() { prompt.MaxLength = project.Mode == SpeechMode.Transcription ? 0 : TextLimit(); UpdateCount(); }
-        private void UpdateCount() { var n = project.Mode == SpeechMode.Dialogue ? project.Dialogue.Sum(x => SpeechProject.TextLength(x.Text)) : SpeechProject.TextLength(prompt.Text); count.Text = project.Mode == SpeechMode.Transcription ? n + " characters" : n + " / " + (project.Mode == SpeechMode.Dialogue ? 2000 : TextLimit()) + " characters"; count.AccessibleName = count.Text; Text = AccessibleName = Program.AppName + " - " + count.Text; }
+        private int EditorLimit() { return project.Mode == SpeechMode.TextToSpeech && settings.AllowLongSpeech ? LongSpeech.MaximumCharacters : TextLimit(); }
+        private void ApplyLimits() { prompt.MaxLength = project.Mode == SpeechMode.Transcription ? 0 : EditorLimit(); UpdateCount(); }
+        private void UpdateCount() { var n = project.Mode == SpeechMode.Dialogue ? project.Dialogue.Sum(x => SpeechProject.TextLength(x.Text)) : SpeechProject.TextLength(prompt.Text); count.Text = project.Mode == SpeechMode.Transcription ? n + " characters" : n + " / " + (project.Mode == SpeechMode.Dialogue ? 2000 : EditorLimit()) + " characters"; count.AccessibleName = count.Text; Text = AccessibleName = Program.AppName + " - " + count.Text; }
         private string HelpDescription(Control control) { return control == prompt ? ContextHelp.Description(control) + "\r\n\r\n" + count.Text + "." : ContextHelp.Description(control); }
         private bool CanInsertSpeechTag() { return operation == null && project.Mode == SpeechMode.TextToSpeech && (project.ModelId.StartsWith("eleven_v3") || project.ModelId.StartsWith("eleven_v4")); }
         private void FillVoices()
@@ -233,7 +233,7 @@ namespace ElevenLabsSpeechGenerator
                 Log("Playing the existing voice preview. No generation credits were used.");
             });
         }
-        private void InsertSpeechTag() { if (CanInsertSpeechTag()) SpeechTags.Show(this, prompt, TextLimit()); }
+        private void InsertSpeechTag() { if (CanInsertSpeechTag()) SpeechTags.Show(this, prompt, EditorLimit()); }
         private static string SelectedId(ComboBox c) { var x = c.SelectedItem as NamedItem; return x == null ? "" : x.Id; }
         private static void Select(ComboBox c, string id) { var item = c.Items.Cast<NamedItem>().FirstOrDefault(x => x.Id == id); if (item == null && !string.IsNullOrEmpty(id)) { item = new NamedItem { Id = id, Name = "Unavailable: " + id }; c.Items.Add(item); } if (item != null) c.SelectedItem = item; else if (c.Items.Count > 0) c.SelectedIndex = 0; }
         private SpeechClient Client() { return new SpeechClient(AppPaths.LoadApiKey()); }
@@ -289,9 +289,12 @@ namespace ElevenLabsSpeechGenerator
         private async Task Generate()
         {
             if (operation != null) return; CaptureProject();
-            try { project.Validate(TextLimit()); } catch (Exception ex) { Ui.Result(this, "Cannot generate", ex.Message); return; }
+            int requestLimit = TextLimit(); bool longSpeech = project.Mode == SpeechMode.TextToSpeech && settings.AllowLongSpeech && project.Text.Length > requestLimit; int parts = 1;
+            try { project.Validate(EditorLimit()); if (longSpeech) parts = LongSpeech.Split(project.Text, requestLimit).Count; } catch (Exception ex) { Ui.Result(this, "Cannot generate", ex.Message); return; }
             bool single = project.Mode != SpeechMode.TextToSpeech && project.Mode != SpeechMode.Dialogue && project.Mode != SpeechMode.VoiceChanger;
-            if (MessageBox.Show(this, "Generate " + (single ? 1 : project.Variations) + " " + mode.Text.ToLowerInvariant() + " request(s)? This sends your text or audio to ElevenLabs and may spend credits.", "Confirm generation", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
+            var confirmation = "Generate " + (single ? 1 : project.Variations * parts) + " " + mode.Text.ToLowerInvariant() + " request(s)? This sends your text or audio to ElevenLabs and may spend credits.";
+            if (longSpeech) confirmation += "\r\n\r\nEach variation will use " + parts + " parts in your chosen format and be saved as one WAV at " + LongSpeech.SampleRate(project.OutputFormat) + " Hz. Verified parts from an identical unfinished job will be reused. An interrupted request already accepted by ElevenLabs may still have incurred a charge; the app does not retry it automatically.";
+            if (MessageBox.Show(this, confirmation, "Confirm generation", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
             var request = JsonData.Serializer().Deserialize<SpeechProject>(JsonData.Encode(project)); var selectedModel = model.SelectedItem as NamedItem;
             var selectedVoice = voice.SelectedItem as NamedItem;
             var folder = FileNames.GenerationFolder(settings.DefaultOutputFolder, request.Mode, selectedVoice == null ? request.VoiceId : selectedVoice.Name.Replace(" (current, outside group)", ""));
@@ -299,12 +302,19 @@ namespace ElevenLabsSpeechGenerator
             await Run("Generating " + mode.Text.ToLowerInvariant(), async token =>
             {
                 Directory.CreateDirectory(folder); var timer = Stopwatch.StartNew(); var client = Client(); int total = single ? 1 : request.Variations;
+                List<ApiResult> longResults = null;
+                if (longSpeech)
+                {
+                    var longStem = FileNames.Stem(string.IsNullOrWhiteSpace(request.Filename) ? string.Join(" ", request.Text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries).Take(8).ToArray()) : request.Filename);
+                    var updates = new Progress<string>(message => { if (!IsDisposed) Log(message); });
+                    longResults = await Task.Run(() => LongSpeech.Generate(request, selectedModel, folder, longStem, requestLimit, token, message => ((IProgress<string>)updates).Report(message), (part, context, output, cancellation) => client.Generate(part, selectedModel, output, cancellation, context)));
+                }
                 for (int i = 1; i <= total; i++)
                 {
                     token.ThrowIfCancellationRequested(); var stem = FileNames.Stem(string.IsNullOrWhiteSpace(request.Filename) ? string.Join(" ", request.Text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries).Take(8).ToArray()) : request.Filename);
                     if ((request.Mode == SpeechMode.Transcription || request.Mode == SpeechMode.ForcedAlignment || request.Mode == SpeechMode.VoiceIsolation) && string.IsNullOrWhiteSpace(request.Filename)) stem = FileNames.Stem(Path.GetFileNameWithoutExtension(request.InputFile));
                     var path = FileNames.Next(folder, stem + (total > 1 ? "_v" + i : ""), request.Mode == SpeechMode.VoiceIsolation || request.OutputFormat.StartsWith("pcm_") ? ".wav" : ".mp3"); var one = Stopwatch.StartNew();
-                    var result = await Task.Run(() => client.Generate(request, selectedModel, path, token));
+                    var result = longResults == null ? await Task.Run(() => client.Generate(request, selectedModel, path, token)) : longResults[i - 1];
                     if (request.Mode == SpeechMode.Transcription || request.Mode == SpeechMode.ForcedAlignment)
                     {
                         var data = JsonData.Object(result.Json); prompt.Text = SpeechProject.WindowsLines(request.Mode == SpeechMode.ForcedAlignment ? request.Text : JsonData.String(data, "text"));
@@ -329,7 +339,7 @@ namespace ElevenLabsSpeechGenerator
                         audio.Add(result.File);
                         if (settings.SaveDetails) SaveDetails(folder, Path.GetFileNameWithoutExtension(result.File), new Dictionary<string, object> { { "project", request }, { "request_id", result.RequestId }, { "generated_utc", DateTime.UtcNow.ToString("o") } });
                     }
-                    Log("Request " + i + " completed in " + one.Elapsed.TotalSeconds.ToString("F1") + " seconds.");
+                    if (!longSpeech) Log("Request " + i + " completed in " + one.Elapsed.TotalSeconds.ToString("F1") + " seconds.");
                 }
                 Log("Generation complete. Elapsed: " + timer.Elapsed.TotalSeconds.ToString("F1") + " seconds."); progress.Text = progress.AccessibleName = "Generation complete"; progress.NotifyNameChanged(); if (settings.CompletionSound && !(settings.AutoPlayGenerations && audio.Count > 0)) SystemSounds.Asterisk.Play();
                 complete = true;
@@ -366,7 +376,7 @@ namespace ElevenLabsSpeechGenerator
             finally { balanceOperation.Dispose(); balanceOperation = null; }
         }
         private void Preferences() { Preferences(0); }
-        private void Preferences(int tab) { if (operation != null) return; var previousFormat = settings.DefaultOutputFormat; using (var f = new PreferencesForm(settings, tab)) if (f.ShowDialog(this) == DialogResult.OK) { StopPlayback(); if (settings.DefaultOutputFormat != previousFormat) { project.OutputFormat = settings.DefaultOutputFormat; format.SelectedItem = project.OutputFormat; } StartCatalogLoad(); RefreshBalance(); } }
+        private void Preferences(int tab) { if (operation != null) return; var previousFormat = settings.DefaultOutputFormat; using (var f = new PreferencesForm(settings, tab)) if (f.ShowDialog(this) == DialogResult.OK) { StopPlayback(); if (settings.DefaultOutputFormat != previousFormat) { project.OutputFormat = settings.DefaultOutputFormat; format.SelectedItem = project.OutputFormat; } ApplyLimits(); StartCatalogLoad(); RefreshBalance(); } }
         private void ChooseInput() { using (var d = new OpenFileDialog { Filter = "Audio and video|*.wav;*.mp3;*.m4a;*.flac;*.ogg;*.mp4;*.webm|All files|*.*" }) if (d.ShowDialog(this) == DialogResult.OK) input.Text = d.FileName; }
         private void VoiceSettings() { if (operation != null) return; CaptureProject(); ToolDialogs.VoiceSettings(this, project, model.SelectedItem as NamedItem); }
         private void EditDialogue() { if (operation != null || project.Mode != SpeechMode.Dialogue) return; CaptureProject(); ToolDialogs.Dialogue(this, project, voices); Bind(); }

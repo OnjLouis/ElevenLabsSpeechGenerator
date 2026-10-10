@@ -55,13 +55,17 @@ struct ToolView: View {
     }
     private var clone: some View {
         VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
             TextField("Voice name", text: $name).accessibilityHint("Name for the cloned voice in your account.")
             TextField("Voice description", text: $description).accessibilityHint("Optional description of the voice.")
             List(samples, id: \.self) { Text($0.lastPathComponent) }.accessibilityLabel("Voice samples").frame(minHeight: 120)
             HStack { Button("Add Audio Files...") { let p = NSOpenPanel(); p.allowsMultipleSelection = true; if p.runModal() == .OK { for url in p.urls where !samples.contains(url) { samples.append(url) } } }.accessibilityHint("Add recordings of the voice you have permission to clone."); Button("Clear Samples") { samples = [] }.accessibilityHint("Remove the selected sample list without deleting any files.") }
             Toggle("I have the rights and consent to clone this voice", isOn: $consent).accessibilityHint("Confirm that the speaker has given permission and you have the necessary rights.")
-            Button("Create Voice") { model.clone(name: name, description: description, samples: samples, consent: consent) }.accessibilityHint("Upload the samples and create a voice in your account.")
-        }.disabled(model.busy)
+            Button("Create Voice") { model.clone(name: name, description: description, samples: samples, consent: consent) }.disabled(model.cloneCreated).accessibilityHint("Upload the samples and create a voice in your account.")
+            }.disabled(model.busy)
+            KeyboardTextView(text: .constant(model.cloneStatus), editable: false, accessibilityLabel: "Clone status", accessibilityHelp: "Upload progress and the result of creating the voice.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 100)
+            if model.cloneUploading { ProgressView().accessibilityLabel("Creating voice") }
+        }
     }
     private var voiceSettings: some View {
         Form {

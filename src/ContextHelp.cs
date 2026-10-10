@@ -12,6 +12,30 @@ namespace ElevenLabsSpeechGenerator
         private const int KeyDownMessage = 0x0100;
         private static readonly Dictionary<string, string> Instructions = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
+            { "Clone voice/Voice description", "Optional description of the cloned voice. This does not change how the samples sound." },
+            { "Add audio files", "Choose recordings to include as voice-cloning samples. You can select several files; selecting them does not upload them yet." },
+            { "Remove sample", "Remove the selected recording from the upload list without deleting the original file." },
+            { "I have the rights and consent to clone this voice", "Confirm that the speaker has given permission and that you have the rights to use these recordings for voice cloning." },
+            { "Create voice", "Upload the selected samples and create a cloned voice in your account after confirmation. Clone status reports upload progress and the result." },
+            { "Cancel upload", "Stop the active cloning request. If the upload has already reached ElevenLabs, the voice may still be created; check your voice library before retrying." },
+            { "Add line", "Add a dialogue line using the selected voice." },
+            { "Remove", "Remove the selected dialogue line. Other lines are kept; the changes are applied when you choose OK." },
+            { "Move up", "Move the selected dialogue line earlier in the conversation." },
+            { "Move down", "Move the selected dialogue line later in the conversation." },
+            { "Insert tag", "Choose a delivery instruction to insert at the saved cursor position in this dialogue line, without replacing selected text." },
+            { "Browse", "Choose the default folder for completed recordings and transcripts." },
+            { "Automatic dubbing/Browse", "Choose the local audio or video file to translate. Selecting it does not upload it or start dubbing." },
+            { "Choose audio", "Choose a recording for the current operation. Selecting it does not upload it or start generation." },
+            { "Add preview voice", "Save the selected designed or remixed voice preview as a new voice in your account after confirmation." },
+            { "Create", "Create a pronunciation dictionary in your account, starting with its name and first rule." },
+            { "Dictionary name", "Name for the pronunciation dictionary being created in your account." },
+            { "Download", "Download the selected history recording to a local file. This retrieves existing audio without generating it again." },
+            { "Generation history/Play", "Download and play the selected history recording without generating it again." },
+            { "Generation history/Items", "Choose an existing account recording to download or play." },
+            { "Voice library/Items", "Choose a voice to preview or use. Delete Voice removes an account voice only after confirmation." },
+            { "Pronunciation dictionaries/Items", "Choose up to three pronunciation dictionaries to apply to speech, or select one to export or add a rule." },
+            { "Allow long speech text", "Allow up to 500,000 characters in Text to speech. Split at paragraph, sentence or word boundaries and assemble one WAV per variation. Each part is a separate paid request; completed parts can be reused when resuming the identical request." },
+            { "Open manual", "Open the complete application guide in your browser." },
             { "Mode", "Choose the operation. Each mode keeps its own draft." },
             { "Voice", "Choose the voice used for speech or voice conversion. Refresh voices reloads the account choices." },
             { "Voice group", "Filter the account's loaded voices. Your Voices uses account ownership, Cloned includes instant and professional clones, Designed shows generated voices, Default shows premade voices, and Shared shows voices owned by others. The current voice stays selectable with an outside-group label so filtering never silently changes it." },
@@ -57,6 +81,8 @@ namespace ElevenLabsSpeechGenerator
             { "Custom tag", "Enter one delivery instruction, with or without square brackets. Save Custom Tag keeps it for reuse; Insert uses it immediately without saving. Tags are instructions before speech, not opening and closing markup." },
             { "Preference categories", "Choose General, API key, Updates or Audio, then move to that tab's controls." },
             { "Play a completion sound", "Play a short signal when generation finishes. Automatic audio playback replaces this signal when enabled." },
+            { "Allow long speech text (split into parts)", "Allow up to 500,000 characters in Text to speech. The app splits at paragraph, sentence or word boundaries within the model's limit and assembles one WAV per variation. Each part is a separate paid request. Completed parts can be reused when you resume the identical request." },
+            { "Clone status", "Shows upload progress, the wait for ElevenLabs to create the voice, and the final result." },
             { "Save generation details", "Save reusable request and project information as JSON in the output folder's Details subfolder. These files may contain your text but never your API key." },
             { "Check for updates", "Choose how often to check for a new version. Startup checks when the app opens; Never disables automatic checks. Manual checks remain available." },
             { "Install verified updates silently", "Install verified updates found by automatic checks without asking. Off by default. Your preferences, drafts and recordings are preserved." },
@@ -157,10 +183,13 @@ namespace ElevenLabsSpeechGenerator
         internal static string Description(Control control)
         {
             string text;
-            if (Instructions.TryGetValue(ControlName(control), out text)) return text;
+            var name = ControlName(control);
+            var form = control == null ? null : control.FindForm();
+            if (form != null && Instructions.TryGetValue(form.Text + "/" + name, out text)) return text;
+            if (Instructions.TryGetValue(name, out text)) return text;
             for (var current = control; current != null && !(current is Form); current = current.Parent)
                 if (!string.IsNullOrEmpty(current.AccessibleDescription)) return current.AccessibleDescription;
-            return "Use this control to change the current task or its settings. Open the manual for the full workflow.";
+            return "No additional description is available for " + name + ".";
         }
         internal static void Show(Form owner, Action manual, Func<Control, string> describe = null)
         {

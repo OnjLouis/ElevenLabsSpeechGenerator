@@ -3,7 +3,7 @@ import CoreAudio
 import Foundation
 
 extension AppModel {
-    func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; tool = kind; catalog = []; selectedCatalog = []; cursor = ""; search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
+    func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; if kind == .clone { cloneCreated = false; cloneStatus = "Ready. Add samples and confirm consent before creating a voice." }; tool = kind; catalog = []; selectedCatalog = []; cursor = ""; search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
     func refreshTool(next: Bool = false) {
         guard let kind = tool, !next || !cursor.isEmpty else { return }; let page = next ? cursor : "", query = Self.escape(search), shared = sharedVoices
         run("Loading \(kind.rawValue)") {
@@ -89,7 +89,18 @@ extension AppModel {
     func clone(name: String, description: String, samples: [URL], consent: Bool) {
         guard consent, !name.isEmpty, !samples.isEmpty else { showResult("Cannot clone", "Enter a name, add samples, and confirm that you have the rights and consent."); return }
         guard confirm("Create voice", "Upload these samples and create a voice in your account?") else { return }
-        run("Cloning voice") { _ = try await self.service().upload("/v1/voices/add", fields: ["name": name, "description": description], files: samples.map { ("files", $0) }); self.log("Voice created. Refresh the voice list to use it."); self.tool = nil }
+        run("Cloning voice") {
+            self.cloneUploading = true; defer { self.cloneUploading = false }
+            do {
+                _ = try await self.service().upload("/v1/voices/add", fields: ["name": name, "description": description], files: samples.map { ("files", $0) }, progress: { message in
+                    Task { @MainActor in if self.cloneUploading { self.cloneStatus = message } }
+                })
+                self.cloneCreated = true; self.cloneStatus = "Voice created successfully. It has been added to your account."; self.log(self.cloneStatus)
+            } catch {
+                self.cloneStatus = "The request did not complete locally. If the upload reached ElevenLabs, the voice may still have been created. Check your voice library before trying again.\n" + error.localizedDescription
+                throw error
+            }
+        }
     }
 }
 

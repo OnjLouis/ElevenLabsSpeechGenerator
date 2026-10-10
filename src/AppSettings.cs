@@ -15,6 +15,7 @@ namespace ElevenLabsSpeechGenerator
         public string DefaultOutputFormat = "mp3_44100_128";
         public string VoiceGroup = "All voices";
         public bool SaveDetails = true;
+        public bool AllowLongSpeech;
         public static AppSettings Load()
         {
             var s = new AppSettings(); var ini = IniFile.Load(AppPaths.SettingsPath);
@@ -27,6 +28,7 @@ namespace ElevenLabsSpeechGenerator
             if (bool.TryParse(ini.Get("Updates", "InstallSilently", "false"), out b)) s.InstallUpdatesSilently = b;
             if (bool.TryParse(ini.Get("General", "CompletionSound", "true"), out b)) s.CompletionSound = b;
             if (bool.TryParse(ini.Get("General", "SaveDetails", "true"), out b)) s.SaveDetails = b;
+            if (bool.TryParse(ini.Get("General", "AllowLongSpeech", "false"), out b)) s.AllowLongSpeech = b;
             if (int.TryParse(ini.Get("General", "PlaybackDevice", "-1"), out n)) s.PlaybackDevice = n;
             if (bool.TryParse(ini.Get("Audio", "AutoPlayGenerations", "false"), out b)) s.AutoPlayGenerations = b;
             var format = ini.Get("Audio", "DefaultOutputFormat", s.DefaultOutputFormat);
@@ -64,6 +66,7 @@ namespace ElevenLabsSpeechGenerator
             ini.Set("Audio", "AutoPlayGenerations", AutoPlayGenerations.ToString());
             ini.Set("Audio", "DefaultOutputFormat", DefaultOutputFormat);
             ini.Set("General", "VoiceGroup", VoiceGroup);
+            ini.Set("General", "AllowLongSpeech", AllowLongSpeech.ToString());
             if (string.Equals(Path.GetFullPath(folder), Path.GetFullPath(AppPaths.DefaultAudioFolder), StringComparison.OrdinalIgnoreCase)) folder = @".\Audio";
             ini.Set("General", "OutputFolder", folder); ini.Set("General", "CompletionSound", CompletionSound.ToString()); ini.Set("General", "SaveDetails", SaveDetails.ToString()); ini.Set("General", "PlaybackDevice", PlaybackDevice.ToString(CultureInfo.InvariantCulture));
             ini.Set("Updates", "CheckFrequency", NormalizeUpdateFrequency(UpdateCheckFrequency)); ini.Set("Updates", "InstallSilently", InstallUpdatesSilently.ToString()); ini.Set("Updates", "LastCheckUtc", LastUpdateCheckUtc.ToString("o", CultureInfo.InvariantCulture));

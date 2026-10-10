@@ -22,6 +22,19 @@ final class SpeechTests: XCTestCase {
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("\"SchemaVersion\""))
     }
     func testFiniteSettings() { var p = SpeechProject(); p.speed = .nan; XCTAssertThrowsError(try p.validateStructure()) }
+    func testTypedVariationCounts() throws {
+        var project = SpeechProject()
+        for count in [1, 3, 10] {
+            project.variations = count
+            XCTAssertNoThrow(try project.validateStructure())
+            let reopened = try JSONDecoder().decode(SpeechProject.self, from: SpeechFiles.json(project))
+            XCTAssertEqual(reopened.variations, count)
+        }
+        for count in [-1, 0, 11, 100] {
+            project.variations = count
+            XCTAssertThrowsError(try project.validateStructure())
+        }
+    }
     func testV4Settings() { var p = SpeechProject(); p.modelId = "eleven_v4"; let m = CatalogItem(id: p.modelId, name: "v4", data: ["can_use_style": true, "can_use_speaker_boost": true]); XCTAssertEqual(p.voiceSettings(model: m).count, 2) }
     func testOlderVoiceSettings() { var p = SpeechProject(); p.modelId = "eleven_multilingual_v2"; let m = CatalogItem(id: p.modelId, name: "v2", data: ["can_use_style": true, "can_use_speaker_boost": true]); XCTAssertEqual(p.voiceSettings(model: m).count, 5) }
     func testSpeechModesExcludeEffects() { XCTAssertEqual(SpeechMode.allCases.count, 8); XCTAssertNil(SpeechMode(rawValue: 4)); XCTAssertEqual(SpeechMode.voiceDesign.rawValue, 5) }

@@ -22,7 +22,8 @@ namespace ElevenLabsSpeechGenerator
             Ui.Row(g, "Default &output folder:", folderRow);
             var sound = new CheckBox { Text = "Play a &completion sound", Checked = settings.CompletionSound, AutoSize = true };
             var details = new CheckBox { Text = "Save &generation details", Checked = settings.SaveDetails, AutoSize = true };
-            Ui.Row(g, "", sound); Ui.Row(g, "", details); general.Controls.Add(g);
+            var longSpeech = new CheckBox { Text = "Allow &long speech text (split into parts)", AccessibleName = "Allow long speech text", Checked = settings.AllowLongSpeech, AutoSize = true };
+            Ui.Row(g, "", sound); Ui.Row(g, "", details); Ui.Row(g, "", longSpeech); general.Controls.Add(g);
             var audio = new TabPage("Audio"); tabs.TabPages.Add(audio);
             var audioLayout = Ui.Layout(2); audioLayout.AutoSize = true; audioLayout.Dock = DockStyle.Top;
             var autoPlay = new CheckBox { Text = "Play new &generations automatically in sequence", AccessibleName = "Play new generations automatically in sequence", Checked = settings.AutoPlayGenerations, AutoSize = true };
@@ -81,7 +82,7 @@ namespace ElevenLabsSpeechGenerator
                 }
                 try
                 {
-                    settings.DefaultOutputFolder = full; settings.CompletionSound = sound.Checked; settings.SaveDetails = details.Checked; settings.AutoPlayGenerations = autoPlay.Checked; settings.PlaybackDevice = playbackDevice.SelectedIndex - 1; settings.DefaultOutputFormat = (string)outputFormat.SelectedItem; settings.UpdateCheckFrequency = (string)frequency.SelectedItem; settings.InstallUpdatesSilently = silent.Checked; settings.Save(); DialogResult = DialogResult.OK;
+                    settings.DefaultOutputFolder = full; settings.CompletionSound = sound.Checked; settings.SaveDetails = details.Checked; settings.AllowLongSpeech = longSpeech.Checked; settings.AutoPlayGenerations = autoPlay.Checked; settings.PlaybackDevice = playbackDevice.SelectedIndex - 1; settings.DefaultOutputFormat = (string)outputFormat.SelectedItem; settings.UpdateCheckFrequency = (string)frequency.SelectedItem; settings.InstallUpdatesSilently = silent.Checked; settings.Save(); DialogResult = DialogResult.OK;
                 }
                 catch (Exception ex) { Ui.Result(this, "Could not save preferences", ex.Message); }
             }); ok.TabIndex = 0; buttons.Controls.Add(cancel); buttons.Controls.Add(ok); Controls.Add(tabs); Controls.Add(buttons); AcceptButton = ok; CancelButton = cancel;

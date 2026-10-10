@@ -61,27 +61,47 @@ namespace ElevenLabsSpeechGenerator
         }
         public static void Clone(IWin32Window owner, SpeechClient client)
         {
-            using (var f = Ui.Dialog("Clone voice", new Size(680, 550)))
-            using (var cancellation = new CancellationTokenSource())
+            using (var f = Ui.Dialog("Clone voice", new Size(680, 700)))
             {
+                CancellationTokenSource cancellation = null;
                 var p = Ui.Layout(2); var name = Ui.Text("Voice name", false); var description = Ui.Text("Voice description", true); var samples = new ListBox { AccessibleName = "Voice samples", Height = 130 }; var paths = new List<string>();
                 Ui.Row(p, "&Name:", name); Ui.Row(p, "&Description:", description); Ui.Row(p, "Samples:", samples);
                 Ui.Row(p, "", Ui.Button("&Add audio files...", () => { using (var d = new OpenFileDialog { Multiselect = true, Filter = "Audio|*.wav;*.mp3;*.m4a;*.flac|All files|*.*" }) if (d.ShowDialog(f) == DialogResult.OK) foreach (var path in d.FileNames) if (!paths.Contains(path)) { paths.Add(path); samples.Items.Add(Path.GetFileName(path)); } }));
                 Ui.Row(p, "", Ui.Button("&Remove sample", () => { int i = samples.SelectedIndex; if (i >= 0) { paths.RemoveAt(i); samples.Items.RemoveAt(i); } }));
                 var consent = new CheckBox { Text = "I &have the rights and consent to clone this voice", AutoSize = true }; Ui.Row(p, "", consent);
                 var create = Ui.Button("&Create voice", () => { }); bool busy = false;
+                var status = new AccessibleStatusTextBox { AccessibleName = "Clone status", Multiline = true, ReadOnly = true, Height = 90, ScrollBars = ScrollBars.Vertical, TabStop = true, Text = "Ready. Add samples and confirm consent before creating a voice." };
+                var announcement = new AccessibleStatusLabel { AutoSize = true, AccessibleName = "Clone upload status", Text = "Ready" };
+                var bottom = new FlowLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, Padding = new Padding(8), FlowDirection = FlowDirection.RightToLeft };
+                var close = Ui.Button("Cl&ose", () => f.Close());
+                var cancel = Ui.Button("Cancel &upload", () => { if (cancellation != null) { cancellation.Cancel(); status.UpdateReadableText("Cancelling the request..."); SetCloneStatus(announcement, status.Text); } }); cancel.Enabled = false;
+                bottom.Controls.Add(close); bottom.Controls.Add(cancel);
+                var statusPanel = new TableLayoutPanel { Dock = DockStyle.Bottom, AutoSize = true, ColumnCount = 1, Padding = new Padding(12) };
+                status.Dock = DockStyle.Top; statusPanel.Controls.Add(status); statusPanel.Controls.Add(announcement);
+                Action<string> report = message => { if (f.IsDisposed || !busy) return; status.UpdateReadableText(message); SetCloneStatus(announcement, message); };
                 create.Click += async delegate
                 {
                     if (busy) return; if (!consent.Checked || paths.Count == 0 || string.IsNullOrWhiteSpace(name.Text)) { Ui.Result(f, "Cannot clone", "Enter a name, add samples, and confirm that you have the rights and consent."); return; }
                     if (MessageBox.Show(f, "Upload these voice samples and create a voice in your account?", "Create voice", MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2) != DialogResult.Yes) return;
                     var fields = new Dictionary<string, string> { { "name", name.Text }, { "description", description.Text } }; var files = paths.Select(x => new UploadFile("files", x)).ToList();
-                    busy = true; p.Enabled = false;
-                    try { await Task.Run(() => client.Upload("/v1/voices/add", fields, files, cancellation.Token)); Ui.Result(f, "Voice created", "The voice has been added to your account."); busy = false; f.Close(); }
-                    catch (OperationCanceledException) { } catch (Exception ex) { if (!f.IsDisposed) Ui.Result(f, "Could not clone voice", ex.Message); }
-                    finally { busy = false; if (!f.IsDisposed) { p.Enabled = true; if (cancellation.IsCancellationRequested) f.Close(); } }
+                    cancellation = new CancellationTokenSource(); busy = true; p.Enabled = false; close.Enabled = false; cancel.Enabled = true; f.CancelButton = cancel;
+                    report("Preparing voice samples for upload..."); var progress = new Progress<string>(report);
+                    try
+                    {
+                        await Task.Run(() => client.Upload("/v1/voices/add", fields, files, cancellation.Token, message => ((IProgress<string>)progress).Report(message)));
+                        report("Voice created successfully. It has been added to your account."); create.Enabled = false;
+                    }
+                    catch (OperationCanceledException) { report("Request cancelled. If the upload had already reached ElevenLabs, the voice may still have been created. Check your voice library before trying again."); }
+                    catch (Exception ex) { report("Could not create the voice. " + ex.Message + " Check your voice library before retrying an upload that may already have reached ElevenLabs."); }
+                    finally { busy = false; cancellation.Dispose(); cancellation = null; if (!f.IsDisposed) { p.Enabled = true; close.Enabled = true; cancel.Enabled = false; f.CancelButton = close; } }
                 };
-                Ui.Row(p, "", create); f.Controls.Add(p); Ui.CloseButton(f); f.FormClosing += delegate(object s, FormClosingEventArgs e) { if (busy) { e.Cancel = true; cancellation.Cancel(); } }; f.ShowDialog(owner);
+                Ui.Row(p, "", create); f.Controls.Add(p); f.Controls.Add(statusPanel); f.Controls.Add(bottom); f.CancelButton = close;
+                f.FormClosing += delegate(object s, FormClosingEventArgs e) { if (busy) { e.Cancel = true; cancel.PerformClick(); } }; f.ShowDialog(owner);
             }
+        }
+        private static void SetCloneStatus(AccessibleStatusLabel label, string message)
+        {
+            label.Text = message; label.NotifyNameChanged();
         }
     }
 }
