@@ -37,6 +37,7 @@ import SwiftUI
                 Button("Audio Settings...") { model.settingsTab = "Audio"; openSettings() }.keyboardShortcut("u").disabled(model.busy)
             }
             CommandGroup(replacing: .help) {
+                Button("Version History...") { VersionHistory.show() }
                 Button("Help for Focused Control") { ContextHelp.shared.show() }.keyboardShortcut(KeyEquivalent("\u{F704}"), modifiers: [])
                 Button("ElevenLabs Speech Generator Help", action: model.manual)
                 Button("Project Page") { model.open(AppModel.repo) }.keyboardShortcut(KeyEquivalent("\u{F704}"), modifiers: .command)

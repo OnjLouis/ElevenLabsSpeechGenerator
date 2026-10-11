@@ -112,7 +112,7 @@ final class SpeechService {
     private func send(_ method: String, path: String, body: Data? = nil, upload: URL? = nil, contentType: String = "application/json", progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
         guard !key.isEmpty, !key.contains("\r"), !key.contains("\n") else { throw SpeechError.validation("Enter a valid API key in Settings first.") }
         var r = URLRequest(url: URL(string: path, relativeTo: origin)!.absoluteURL); r.httpMethod = method; r.timeoutInterval = 600
-        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.1.0", forHTTPHeaderField: "User-Agent")
+        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.1.1", forHTTPHeaderField: "User-Agent")
         if body != nil || upload != nil { r.setValue(contentType, forHTTPHeaderField: "Content-Type") }; r.httpBody = body
         let result = try await BoundedResponse(limit: 256 * 1024 * 1024, uploadProgress: progress).receive(r, upload: upload, configuration: configuration)
         try Task.checkCancellation()

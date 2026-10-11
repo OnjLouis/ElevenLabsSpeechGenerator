@@ -28,6 +28,31 @@ namespace ElevenLabsSpeechGenerator
                 System.Windows.Forms.Application.Run(context);
             }
         }
+        private static void TestVersionHistoryMenu()
+        {
+            using (var form = new MainForm(null))
+            {
+                var help = form.MainMenuStrip.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().First(x => x.Text.Replace("&", "") == "Help");
+                Check(help.DropDownItems.OfType<System.Windows.Forms.ToolStripMenuItem>().Any(x => x.Text.Replace("&", "").Equals("Version history...", StringComparison.OrdinalIgnoreCase)), "Help must contain Version History.");
+                Check(VersionHistory.Text.StartsWith(Program.Version + Environment.NewLine + Environment.NewLine) && VersionHistory.Text.Contains(Environment.NewLine + Environment.NewLine + "1.1.0" + Environment.NewLine), "History must show this version before the previous release.");
+                Check(!VersionHistory.Text.Contains("\\n") && !VersionHistory.Text.Replace("\r\n", "").Contains("\n"), "History must use native Windows line breaks.");
+                using (var dialog = VersionHistory.CreateDialog())
+                {
+                    dialog.StartPosition = System.Windows.Forms.FormStartPosition.Manual;
+                    dialog.Location = new System.Drawing.Point(-2000, -2000);
+                    dialog.Show(form);
+                    System.Windows.Forms.Application.DoEvents();
+                    var text = Descendants(dialog).OfType<System.Windows.Forms.TextBox>().Single();
+                    var close = Descendants(dialog).OfType<System.Windows.Forms.Button>().Single();
+                    Check(dialog.Owner == form && !dialog.ShowInTaskbar, "History must remain owned by the app, not a separate taskbar window.");
+                    Check(text.ReadOnly && text.Multiline && text.TabStop && text.Focused && text.Text == VersionHistory.Text, "History must open focused in a readable, copyable edit.");
+                    Check(text.AccessibleName == "Version history" && string.IsNullOrEmpty(text.AccessibleDescription), "History must have a concise screen-reader name.");
+                    Check(dialog.CancelButton == close && dialog.AcceptButton == close, "Escape and Enter must close history.");
+                    dialog.Close();
+                }
+            }
+        }
+
         private static void TestNativePlayback()
         {
             var folder = Path.Combine(AppPaths.AppFolder, "Native playback test");
@@ -168,6 +193,7 @@ namespace ElevenLabsSpeechGenerator
         }
         private static void RunChecks()
         {
+            TestVersionHistoryMenu();
             TestStartupArguments();
             TestCloneDialog();
             count += LongSpeechTests.Run();

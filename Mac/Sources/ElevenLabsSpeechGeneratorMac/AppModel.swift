@@ -271,7 +271,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
             let (data, response) = try await URLSession.shared.data(from: URL(string: "https://api.github.com/repos/OnjLouis/ElevenLabsSpeechGenerator/releases?per_page=100")!)
             if (response as? HTTPURLResponse)?.statusCode == 404 { if !automatic { showResult("Check for updates", "No update is currently available.") }; return }
             guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SpeechError.response("The update service is unavailable. Please try again later.") }
-            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.0"
+            let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.1.1"
             guard let r = try ReleaseCatalog.newerMacRelease(in: data, currentVersion: version) else { if !automatic { showResult("Check for updates", "The app is up to date.") }; return }
             guard !busy && tool != .dubbing else { if !automatic { showResult("Update postponed", "Finish the active request and close Automatic Dubbing before installing an update.") }; return }
             if automatic && preferences.installUpdatesSilently || confirm("Update available", "Version \(r.version) is available. Download, verify and install it, then reopen the app?") { busy = true; defer { busy = false }; flushDrafts(); try await MacUpdateInstaller.start(r) }
