@@ -16,6 +16,7 @@ namespace ElevenLabsSpeechGenerator
         public static int Run()
         {
             ServicePointManager.Expect100Continue = false;
+            TestCatalogPages();
             var folder = Path.Combine(AppPaths.AppFolder, "ApiFixtures"); Directory.CreateDirectory(folder);
             var p = new SpeechProject { VoiceId = "voice-a", Text = "Hello" };
             var renameVoice = new NamedItem { Id = "owned", Name = "Original", Data = new Dictionary<string, object> { { "is_owner", true }, { "category", "cloned" } } };
@@ -112,6 +113,61 @@ namespace ElevenLabsSpeechGenerator
             Check(Directory.GetFiles(folder, "*.partial").Length == 0, "Failed download left partial files");
             using (var cancelled = new CancellationTokenSource()) { cancelled.Cancel(); try { new SpeechClient("fixture").Get("/v1/models", cancelled.Token); throw new Exception("Cancelled request sent"); } catch (OperationCanceledException) { checks++; } }
             return checks;
+        }
+        private static void TestCatalogPages()
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            foreach (var kind in new[] { "Voices", "History", "Dictionaries", "Shared" })
+            using (var player = new Playback())
+            using (var form = new CatalogForm(kind == "Shared" ? "Voices" : kind, new SpeechClient(""), new AppSettings(), player, new SpeechProject()))
+            {
+                if (kind == "Shared") ((System.Windows.Forms.CheckBox)typeof(CatalogForm).GetField("shared", flags).GetValue(form)).Checked = true;
+                var list = (System.Windows.Forms.ListBox)typeof(CatalogForm).GetField("list", flags).GetValue(form);
+                var previous = (System.Windows.Forms.Button)typeof(CatalogForm).GetField("previousPage", flags).GetValue(form);
+                var next = (System.Windows.Forms.Button)typeof(CatalogForm).GetField("nextPage", flags).GetValue(form);
+                Action<CatalogPageMove, string, bool, string> load = (move, id, more, expected) => {
+                    string key = kind == "History" ? "history" : kind == "Dictionaries" ? "pronunciation_dictionaries" : "voices";
+                    string idKey = kind == "History" ? "history_item_id" : kind == "Dictionaries" ? "id" : "voice_id";
+                    var response = "{\"" + key + "\":[{\"" + idKey + "\":\"" + id + "\",\"name\":\"Fixture\",\"voice_name\":\"Fixture\",\"text\":\"Fixture\"}],\"has_more\":" + (more ? "true" : "false") + ",\"next_page_token\":\"" + id + "\",\"next_cursor\":\"" + id + "\",\"last_history_item_id\":\"" + id + "\"}";
+                    Serve(client => {
+                        typeof(CatalogForm).GetField("client", flags).SetValue(form, client);
+                        var task = (Task)typeof(CatalogForm).GetMethod("LoadPage", flags).Invoke(form, new object[] { move });
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        while (!task.IsCompleted && clock.ElapsedMilliseconds < 3000) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(5); }
+                        Check(task.IsCompleted, "Catalogue request timed out."); task.GetAwaiter().GetResult();
+                    }, "application/json", Encoding.UTF8.GetBytes(response), (request, body) => {
+                        Check(request.StartsWith(expected + " "), "Wrong catalogue cursor: " + request.Split('\r')[0]);
+                    });
+                    Check(list.Items.Count == 1 && ((NamedItem)list.Items[0]).Id == id, "Catalogue did not replace the displayed page.");
+                };
+                string path = kind == "History" ? "/v1/history?page_size=100" : kind == "Dictionaries" ? "/v1/pronunciation-dictionaries?page_size=100" : kind == "Shared" ? "/v1/shared-voices?page_size=100&search=" : "/v2/voices?page_size=100&search=";
+                string parameter = kind == "History" ? "&start_after_history_item_id=" : kind == "Dictionaries" ? "&cursor=" : kind == "Shared" ? "&page=" : "&next_page_token=";
+                load(CatalogPageMove.Refresh, "first", true, "GET " + path);
+                Check(!previous.Enabled && next.Enabled, "First-page buttons are incorrect.");
+                load(CatalogPageMove.Next, "last", false, "GET " + path + parameter + (kind == "Shared" ? "1" : "first"));
+                Check(previous.Enabled && !next.Enabled, "Last-page buttons are incorrect.");
+                using (var dismiss = new System.Windows.Forms.Timer { Interval = 30 })
+                {
+                    bool explained = false;
+                    dismiss.Tick += delegate {
+                        foreach (System.Windows.Forms.Form window in System.Windows.Forms.Application.OpenForms)
+                            if (window is ApiKeyTestResultForm && window.Owner == form) { explained = true; window.Close(); break; }
+                    };
+                    dismiss.Start();
+                    Serve(client => {
+                        typeof(CatalogForm).GetField("client", flags).SetValue(form, client);
+                        var task = (Task)typeof(CatalogForm).GetMethod("LoadPage", flags).Invoke(form, new object[] { CatalogPageMove.Previous });
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        while (!task.IsCompleted && clock.ElapsedMilliseconds < 3000) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(5); }
+                        Check(task.IsCompleted, "Failed-page request did not finish."); task.GetAwaiter().GetResult();
+                    }, "application/json", Encoding.UTF8.GetBytes("{\"detail\":\"Fixture failure\"}"), null, 500);
+                    Check(explained && previous.Enabled && !next.Enabled && ((NamedItem)list.Items[0]).Id == "last", "Failed requests must explain the error and preserve page/buttons.");
+                }
+                load(CatalogPageMove.Previous, "first", true, "GET " + path);
+                Check(!previous.Enabled && next.Enabled, "Previous did not restore first-page buttons.");
+                ((System.Windows.Forms.TextBox)typeof(CatalogForm).GetField("search", flags).GetValue(form)).Text = "new query";
+                Check(!previous.Enabled && !next.Enabled, "Edited queries must not use stale page tokens.");
+            }
         }
         private static void Serve(Action<SpeechClient> action, string type, byte[] payload, Action<string, string> inspect, int status = 200)
         {

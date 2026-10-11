@@ -3,6 +3,10 @@ import AppKit
 @MainActor
 enum VersionHistory {
     static let text = """
+    1.2.1
+
+    Generation History, Voice Library and pronunciation dictionaries now offer Previous Page as well as Next Page. Navigation remains usable after failed requests; Refresh returns to the first page.
+
     1.2.0
 
     - Voice Library can automatically preview selected voices; Return or Preview / Stop toggles playback.

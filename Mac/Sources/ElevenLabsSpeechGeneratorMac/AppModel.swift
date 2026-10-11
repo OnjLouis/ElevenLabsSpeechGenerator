@@ -37,7 +37,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
     lazy var voiceAudition = VoiceAudition(play: { [weak self] url in self?.play(url) },
         stop: { [weak self] in self?.stop() }, isPlaying: { [weak self] in self?.playback.isPlaying == true },
         failed: { [weak self] error in self?.showResult("Voice preview", error.localizedDescription) })
-    var cursor = ""
+    @Published var catalogPages = CatalogPagination()
     var previewFiles: [URL] = []
     weak var promptView: TabAwareTextView?
     weak var dialogueTextView: TabAwareTextView?

@@ -3,9 +3,15 @@ import CoreAudio
 import Foundation
 
 extension AppModel {
-    func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; if kind == .clone { cloneCreated = false; cloneStatus = "Ready. Add samples and confirm consent before creating a voice." }; tool = kind; catalog = []; selectedCatalog = []; cursor = ""; search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
+    func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; if kind == .clone { cloneCreated = false; cloneStatus = "Ready. Add samples and confirm consent before creating a voice." }; tool = kind; catalog = []; selectedCatalog = []; catalogPages = CatalogPagination(); search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
+    var catalogPageContext: String { "\(tool?.rawValue ?? "")\n\(sharedVoices)\n\(search)" }
     func refreshTool(next: Bool = false) {
-        guard let kind = tool, !next || !cursor.isEmpty else { return }; let page = next ? cursor : "", query = Self.escape(search), shared = sharedVoices
+        loadCatalogPage(next ? .next : .refresh)
+    }
+    func loadCatalogPage(_ move: CatalogPageMove) {
+        let scope = catalogPageContext
+        guard !busy, let kind = tool, let page = catalogPages.request(move, scope: scope) else { return }
+        let query = Self.escape(search), shared = sharedVoices
         if kind == .voices { voiceAudition.stop() }
         run("Loading \(kind.rawValue)") {
             let path: String
@@ -21,7 +27,8 @@ extension AppModel {
             if kind == .history { items = items.map { x in var i = x; i.name += " - " + String(x.string("text").prefix(100)).replacingOccurrences(of: "\n", with: " "); return i } }
             self.catalog = items; self.selectedCatalog = []
             let more = d["has_more"] as? Bool == true
-            self.cursor = !more ? "" : kind == .history ? items.last?.id ?? "" : kind == .dictionaries ? d["next_cursor"] as? String ?? "" : shared ? String((Int(page) ?? 0) + 1) : d["next_page_token"] as? String ?? ""
+            let following = !more ? "" : kind == .history ? d["last_history_item_id"] as? String ?? items.last?.id ?? "" : kind == .dictionaries ? d["next_cursor"] as? String ?? "" : shared ? String((Int(page) ?? 0) + 1) : d["next_page_token"] as? String ?? ""
+            self.catalogPages.commit(move, scope: scope, page: page, following: following)
         }
     }
     var catalogSelection: CatalogItem? { catalog.first { selectedCatalog.contains($0.id) } }

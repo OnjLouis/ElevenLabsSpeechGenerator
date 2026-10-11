@@ -6,7 +6,9 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class VersionHistory
     {
-        internal static readonly string Text = "1.2.0" + Environment.NewLine +
+        internal static readonly string Text = "1.2.1" + Environment.NewLine + Environment.NewLine +
+            "Generation History, Voice Library and pronunciation dictionaries now offer Previous Page as well as Next Page. Navigation remains usable after failed requests; Refresh returns to the first page." + Environment.NewLine + Environment.NewLine +
+            "1.2.0" + Environment.NewLine +
             "" + Environment.NewLine +
             "- Voice Library can automatically preview selected voices; Enter or Preview / Stop toggles playback." + Environment.NewLine +
             "- Rename voices owned by your account without changing their IDs or recordings." + Environment.NewLine +

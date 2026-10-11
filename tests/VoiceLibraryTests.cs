@@ -23,6 +23,11 @@ namespace ElevenLabsSpeechGenerator
         public static int Run()
         {
             checks = 0;
+            TestPagination();
+            using (var player = new Playback())
+            foreach (var kind in new[] { "Voices", "History", "Dictionaries" })
+            using (var form = new CatalogForm(kind, new SpeechClient(""), new AppSettings(), player, new SpeechProject()))
+                Check(All(form).OfType<Button>().Any(x => x.Text.Replace("&", "") == "Previous page"), "Missing Previous page in " + kind);
             Check(!new AppSettings().AutoPreviewVoices, "Automatic preview must default to off.");
             var settings = new AppSettings { AutoPreviewVoices = true }; settings.Save();
             Check(AppSettings.Load().AutoPreviewVoices, "Automatic preview must survive restart.");
@@ -104,5 +109,31 @@ namespace ElevenLabsSpeechGenerator
             return checks;
         }
         private static IEnumerable<Control> All(Control root) { foreach (Control child in root.Controls) { yield return child; foreach (var nested in All(child)) yield return nested; } }
+        private static void TestPagination()
+        {
+            foreach (var scope in new[] { "History", "Account voices", "Shared voices", "Dictionaries" })
+            {
+                var pages = new CatalogPagination();
+                Check(!pages.CanPrevious(scope) && !pages.CanNext(scope), "Navigation must begin unavailable.");
+                pages.Commit(CatalogPageMove.Refresh, scope, "", "one");
+                Check(!pages.CanPrevious(scope) && pages.Request(CatalogPageMove.Next, scope) == "one", "First-page navigation is incorrect.");
+                Check(pages.Request(CatalogPageMove.Previous, scope) == null, "Previous must not run on the first page.");
+                pages.Commit(CatalogPageMove.Next, scope, "one", "two");
+                Check(pages.Request(CatalogPageMove.Previous, scope) == "", "Previous must return to the first-page request.");
+                Check(pages.Request(CatalogPageMove.Next, scope) == "two" && pages.Request(CatalogPageMove.Next, scope) == "two", "Preparing a failed request must not advance the page.");
+                pages.Commit(CatalogPageMove.Next, scope, "two", "");
+                Check(!pages.CanNext(scope) && pages.Request(CatalogPageMove.Previous, scope) == "one", "Last page must retain Previous.");
+                pages.Commit(CatalogPageMove.Previous, scope, "one", "two");
+                pages.Commit(CatalogPageMove.Previous, scope, "", "one");
+                Check(!pages.CanPrevious(scope) && pages.CanNext(scope), "Returning to the first page must disable Previous only.");
+                Check(!pages.CanNext(scope + "changed") && !pages.CanPrevious(scope + "changed"), "Search/catalogue changes must invalidate navigation.");
+                Check(pages.Request(CatalogPageMove.Next, scope + "changed") == "", "New queries must start from the first page.");
+                pages.Commit(CatalogPageMove.Refresh, scope + "changed", "", "one");
+                pages.Commit(CatalogPageMove.Next, scope + "changed", "one", "one");
+                Check(!pages.CanNext(scope + "changed"), "Repeated page cursors must not allow an endless loop.");
+                pages.Commit(CatalogPageMove.Refresh, scope, "", "");
+                Check(!pages.CanPrevious(scope) && !pages.CanNext(scope), "Refresh must clear the previous query's history.");
+            }
+        }
     }
 }

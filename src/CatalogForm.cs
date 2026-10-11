@@ -25,7 +25,9 @@ namespace ElevenLabsSpeechGenerator
         private readonly CheckBox autoPreview = new CheckBox { Text = "&Automatically preview selected voices", AutoSize = true, AccessibleName = "Automatically preview selected voices" };
         private Button renameVoice;
         private bool replacingItems;
-        private string cursor = "";
+        private readonly CatalogPagination pages = new CatalogPagination();
+        private readonly Button previousPage;
+        private readonly Button nextPage;
         private bool busy;
         public NamedItem SelectedVoice { get; private set; }
         public readonly Dictionary<string, string> RenamedVoices = new Dictionary<string, string>();
@@ -41,7 +43,13 @@ namespace ElevenLabsSpeechGenerator
             if (kind == "Dictionaries") list.SelectionMode = SelectionMode.MultiExtended;
             var p = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, Padding = new Padding(12) }; p.RowStyles.Add(new RowStyle(SizeType.AutoSize)); p.RowStyles.Add(new RowStyle(SizeType.Percent, 70)); p.RowStyles.Add(new RowStyle(SizeType.Percent, 30)); p.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             var row = new FlowLayoutPanel { Dock = DockStyle.Fill, AutoSize = true }; row.Controls.Add(new Label { Text = "&Search:", AutoSize = true }); row.Controls.Add(search); row.Controls.Add(shared); shared.Visible = kind == "Voices";
-            row.Controls.Add(Ui.Button("&Refresh", async () => await LoadItems(false))); row.Controls.Add(Ui.Button("&Next page", async () => await LoadItems(true))); p.Controls.Add(row, 0, 0); p.Controls.Add(list, 0, 1); p.Controls.Add(description, 0, 2);
+            row.Controls.Add(Ui.Button("&Refresh", async () => await LoadItems(false)));
+            previousPage = Ui.Button("Pre&vious page", async () => await LoadPage(CatalogPageMove.Previous));
+            nextPage = Ui.Button("&Next page", async () => await LoadItems(true));
+            row.Controls.Add(previousPage); row.Controls.Add(nextPage);
+            search.TextChanged += delegate { UpdateRenameAvailability(); };
+            shared.CheckedChanged += delegate { UpdateRenameAvailability(); };
+            p.Controls.Add(row, 0, 0); p.Controls.Add(list, 0, 1); p.Controls.Add(description, 0, 2);
             list.SelectedIndexChanged += delegate {
                 var x = list.SelectedItem as NamedItem; description.Text = x == null ? "" : Describe(x);
                 if (renameVoice != null) renameVoice.Enabled = !busy && !shared.Checked && VoiceNames.CanRename(x);
@@ -66,6 +74,7 @@ namespace ElevenLabsSpeechGenerator
             else { actions.Controls.Add(Ui.Button("&Use selected", ApplyDictionaries)); actions.Controls.Add(Ui.Button("&Create...", CreateDictionary)); actions.Controls.Add(Ui.Button("&Import PLS...", async () => await ImportDictionary())); actions.Controls.Add(Ui.Button("&Export PLS...", async () => await ExportDictionary())); actions.Controls.Add(Ui.Button("Add &rule...", async () => await AddRule())); }
             p.Controls.Add(actions, 0, 3); Controls.Add(p); Ui.CloseButton(this);
             Shown += async delegate { await LoadItems(false); };
+            UpdateRenameAvailability();
             FormClosing += delegate(object s, FormClosingEventArgs e) { if (busy) { cancellation.Cancel(); e.Cancel = true; } };
             FormClosed += delegate { audition.Dispose(); playback.Stop(); cancellation.Dispose(); };
         }
@@ -83,13 +92,23 @@ namespace ElevenLabsSpeechGenerator
         }
         private void UpdateRenameAvailability()
         {
+            if (IsDisposed) return;
+            previousPage.Enabled = !busy && pages.CanPrevious(PageContext);
+            nextPage.Enabled = !busy && pages.CanNext(PageContext);
             if (renameVoice != null && !IsDisposed) renameVoice.Enabled = !busy && !shared.Checked && VoiceNames.CanRename(list.SelectedItem as NamedItem);
         }
+        private string PageContext { get { return kind + "\n" + shared.Checked + "\n" + search.Text; } }
         private async Task LoadItems(bool next)
         {
-            if (next && cursor.Length == 0) return;
+            await LoadPage(next ? CatalogPageMove.Next : CatalogPageMove.Refresh);
+        }
+        private async Task LoadPage(CatalogPageMove move)
+        {
+            if (busy || cancellation.IsCancellationRequested) return;
+            var scope = PageContext; string page = pages.Request(move, scope);
+            if (page == null) return;
             if (kind == "Voices") audition.Stop();
-            var query = search.Text; bool isShared = shared.Checked; string page = next ? cursor : "";
+            var query = search.Text; bool isShared = shared.Checked;
             await Work(async token =>
             {
                 string path = kind == "Voices" ? isShared ? "/v1/shared-voices?page_size=100&search=" + Uri.EscapeDataString(query) + (page.Length > 0 ? "&page=" + page : "") : "/v2/voices?page_size=100&search=" + Uri.EscapeDataString(query) + (page.Length > 0 ? "&next_page_token=" + Uri.EscapeDataString(page) : "") : kind == "History" ? "/v1/history?page_size=100" + (page.Length > 0 ? "&start_after_history_item_id=" + Uri.EscapeDataString(page) : "") : "/v1/pronunciation-dictionaries?page_size=100" + (page.Length > 0 ? "&cursor=" + Uri.EscapeDataString(page) : "");
@@ -100,7 +119,9 @@ namespace ElevenLabsSpeechGenerator
                     if (kind != "Voices" && query.Length > 0 && name.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0) continue;
                     items.Add(new NamedItem { Id = JsonData.String(x, kind == "History" ? "history_item_id" : kind == "Dictionaries" ? "id" : "voice_id"), Name = name, Data = x });
                 }
-                cursor = kind == "History" ? JsonData.Bool(d, "has_more") && source.Count > 0 ? JsonData.String(source.Last(), "history_item_id") : "" : kind == "Dictionaries" ? JsonData.String(d, "next_cursor") : isShared ? JsonData.Bool(d, "has_more") ? (page.Length == 0 ? "1" : (int.Parse(page) + 1).ToString()) : "" : JsonData.String(d, "next_page_token");
+                string following = !JsonData.Bool(d, "has_more") ? "" : kind == "History" ? JsonData.String(d, "last_history_item_id") : kind == "Dictionaries" ? JsonData.String(d, "next_cursor") : isShared ? (page.Length == 0 ? "1" : (int.Parse(page) + 1).ToString()) : JsonData.String(d, "next_page_token");
+                if (kind == "History" && JsonData.Bool(d, "has_more") && following.Length == 0 && source.Count > 0) following = JsonData.String(source.Last(), "history_item_id");
+                pages.Commit(move, scope, page, following);
                 var voiceList = list as PrefixListBox; if (voiceList != null) voiceList.ResetSearch();
                 replacingItems = true;
                 try { list.Items.Clear(); list.Items.AddRange(items.Cast<object>().ToArray()); if (items.Count > 0) list.SelectedIndex = 0; }

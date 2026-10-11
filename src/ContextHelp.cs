@@ -105,6 +105,7 @@ namespace ElevenLabsSpeechGenerator
             { "Cancel", "Discard this dialog's unaccepted edits and return to its previous window." },
             { "Refresh", "Reload catalogue results using the current search and voice-library choice." },
             { "Next page", "Load another page of catalogue results, where available." },
+            { "Previous page", "Return to the preceding page of results. Refresh starts again at the first page." },
             { "Search shared voice library", "Search publicly shared voices instead of your account list. Adding one to your account requires confirmation." },
             { "Use voice", "Select this voice for the current speech project. A shared-library voice is added to your account only after confirmation." },
             { "Preview", "Play a voice's existing preview without generating a new recording." },

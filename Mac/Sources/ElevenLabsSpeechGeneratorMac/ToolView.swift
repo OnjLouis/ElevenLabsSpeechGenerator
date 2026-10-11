@@ -37,7 +37,13 @@ struct ToolView: View {
     }
     private var catalog: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack { TextField("Search", text: $model.search).accessibilityHint("Search voices, history or dictionary names."); if kind == .voices { Toggle("Shared Voice Library", isOn: $model.sharedVoices).accessibilityHint("Search public voices instead of your account voices.") }; Button("Refresh") { model.refreshTool() }.disabled(model.busy).accessibilityHint("Reload results using the current search and catalogue choice."); Button("Next Page") { model.refreshTool(next: true) }.disabled(model.busy || model.cursor.isEmpty).accessibilityHint("Load more catalogue results where available.") }
+            HStack {
+                TextField("Search", text: $model.search).accessibilityHint("Search voices, history or dictionary names.")
+                if kind == .voices { Toggle("Shared Voice Library", isOn: $model.sharedVoices).accessibilityHint("Search public voices instead of your account voices.") }
+                Button("Refresh") { model.refreshTool() }.disabled(model.busy).accessibilityHint("Reload results from the first page using the current search and catalogue choice.")
+                Button("Previous Page") { model.loadCatalogPage(.previous) }.disabled(model.busy || !model.catalogPages.canPrevious(model.catalogPageContext)).accessibilityHint("Return to the preceding page of results.")
+                Button("Next Page") { model.refreshTool(next: true) }.disabled(model.busy || !model.catalogPages.canNext(model.catalogPageContext)).accessibilityHint("Load more catalogue results where available.")
+            }
             List(model.catalog, selection: $model.selectedCatalog) { Text($0.name).tag($0.id) }.accessibilityLabel(title).accessibilityHint(kind == .dictionaries ? "Select up to three dictionaries to use for speech." : kind == .voices ? "Return or Command+P starts or stops the selected preview." : "Choose an item.").frame(minHeight: 180)
                 .onChange(of: model.selectedCatalog) { _, _ in if kind == .voices { model.catalogVoiceChanged() } }
                 .onKeyPress(.return) { if kind == .voices { model.previewVoice(); return .handled }; return .ignored }
