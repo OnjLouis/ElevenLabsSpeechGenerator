@@ -8,7 +8,7 @@ namespace ElevenLabsSpeechGenerator
     {
         internal static ComboBox DeviceList(int selected)
         {
-            var list = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Top, AccessibleName = "Playback device" };
+            var list = new PrefixComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Top, AccessibleName = "Playback device" };
             list.Items.Add("System default");
             for (int i = 0; i < WaveOut.DeviceCount; i++) list.Items.Add(WaveOut.GetCapabilities(i).ProductName);
             list.SelectedIndex = selected >= -1 && selected < WaveOut.DeviceCount ? selected + 1 : 0;

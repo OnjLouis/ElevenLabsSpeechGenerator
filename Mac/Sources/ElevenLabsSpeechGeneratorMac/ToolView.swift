@@ -21,7 +21,7 @@ struct ToolView: View {
         }.padding(20).onAppear { lines = model.project.dialogue; selectedLine = lines.first?.id }
             .onChange(of: lines.map(\.text)) { _, _ in updateTagLimit() }
             .onChange(of: selectedLine) { _, _ in updateTagLimit() }
-            .onDisappear { if kind == .dialogue { model.dialogueTextView = nil } }
+            .onDisappear { if kind == .dialogue { model.dialogueTextView = nil }; if kind == .voices { model.voiceAudition.stop() } }
             .interactiveDismissDisabled(model.busy).onExitCommand { if model.busy { model.cancel() } else { model.tool = nil } }
     }
     private var title: String { switch kind { case .voices: return "Voice library"; case .history: return "Generation history"; case .dictionaries: return "Pronunciation dictionaries"; case .clone: return "Clone voice"; case .dialogue: return "Dialogue"; case .voiceSettings: return "Voice settings"; case .settings: return "Settings"; case .dubbing: return "Automatic dubbing" } }
@@ -38,12 +38,22 @@ struct ToolView: View {
     private var catalog: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack { TextField("Search", text: $model.search).accessibilityHint("Search voices, history or dictionary names."); if kind == .voices { Toggle("Shared Voice Library", isOn: $model.sharedVoices).accessibilityHint("Search public voices instead of your account voices.") }; Button("Refresh") { model.refreshTool() }.disabled(model.busy).accessibilityHint("Reload results using the current search and catalogue choice."); Button("Next Page") { model.refreshTool(next: true) }.disabled(model.busy || model.cursor.isEmpty).accessibilityHint("Load more catalogue results where available.") }
-            List(model.catalog, selection: $model.selectedCatalog) { Text($0.name).tag($0.id) }.accessibilityLabel(title).accessibilityHint(kind == .dictionaries ? "Select up to three dictionaries to use for speech." : "Choose an item.").frame(minHeight: 180)
+            List(model.catalog, selection: $model.selectedCatalog) { Text($0.name).tag($0.id) }.accessibilityLabel(title).accessibilityHint(kind == .dictionaries ? "Select up to three dictionaries to use for speech." : kind == .voices ? "Return or Command+P starts or stops the selected preview." : "Choose an item.").frame(minHeight: 180)
+                .onChange(of: model.selectedCatalog) { _, _ in if kind == .voices { model.catalogVoiceChanged() } }
+                .onKeyPress(.return) { if kind == .voices { model.previewVoice(); return .handled }; return .ignored }
             if let x = model.catalogSelection {
                 KeyboardTextView(text: .constant((x.data["description"] as? String ?? x.string("text"))), editable: false, accessibilityLabel: "Details", accessibilityHelp: "Details for the selected item.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 80)
             }
             HStack {
-                if kind == .voices { Button("Use Voice", action: model.useVoice).accessibilityHint("Select this voice. Adding a shared voice to your account requires confirmation."); Button("Preview", action: model.previewVoice).accessibilityHint("Play the voice's existing preview without generating new audio."); Button("Delete Voice", action: model.deleteVoice).disabled(model.sharedVoices).accessibilityHint("Permanently remove this account voice after confirmation.") }
+                if kind == .voices {
+                    Button("Use Voice", action: model.useVoice).accessibilityHint("Select this voice. Adding a shared voice to your account requires confirmation.")
+                    Button("Preview / Stop", action: model.previewVoice).keyboardShortcut("p", modifiers: .command).accessibilityHint("Command+P. Start or stop the existing preview without generating audio. Return does the same in the voice list.")
+                    Toggle("Automatically Preview Selected Voices", isOn: Binding(get: { model.preferences.autoPreviewVoices == true }, set: { value in model.preferences.autoPreviewVoices = value; model.preferences.save(); model.catalogVoiceChanged() }))
+                        .accessibilityHint("Audition voices as you select them. This preference is saved. Voices without a preview remain silent.")
+                        .onChange(of: model.sharedVoices) { _, _ in model.voiceAudition.stop() }
+                    Button("Rename Voice...", action: model.renameVoice).disabled(!model.canRenameVoice).accessibilityHint("Change the account name without changing the voice ID, samples or settings. Only voices your account owns can be renamed; Voices Write permission is required.")
+                    Button("Delete Voice", action: model.deleteVoice).disabled(model.sharedVoices).accessibilityHint("Permanently remove this account voice after confirmation.")
+                }
                 if kind == .history { Button("Download") { model.historyDownload() }.accessibilityHint("Save the selected existing recording locally."); Button("Play") { model.historyDownload(play: true) }.accessibilityHint("Download and play this existing recording without generating it again.") }
                 if kind == .dictionaries { Button("Use Selected", action: model.applyDictionaries).accessibilityHint("Use up to three selected dictionaries for speech."); Button("Import PLS...", action: model.importDictionary).accessibilityHint("Upload a lexicon file to create an account dictionary."); Button("Export PLS...", action: model.exportDictionary).accessibilityHint("Save the selected dictionary as a local lexicon file.") }
             }.disabled(model.busy)

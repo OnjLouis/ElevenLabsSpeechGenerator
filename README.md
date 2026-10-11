@@ -24,6 +24,7 @@ Choose a mode, enter text or select an input file, then review the confirmation 
 - Transcription with text and subtitles, and alignment of an existing transcript to its recording.
 - Voice conversion and background-noise isolation.
 - Voice design and remix previews, plus voice-library and cloning tools.
+- Optional automatic voice-library previews, preview start/stop shortcuts and renaming voices owned by your account.
 - Automatic dubbing from local audio/video or a public HTTPS source, with saved jobs and safe resume.
 - Pronunciation dictionaries and generation history.
 - Audio-device selection, optional sequential playback and reusable projects.

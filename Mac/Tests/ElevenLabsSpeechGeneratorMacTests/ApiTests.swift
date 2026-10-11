@@ -39,6 +39,21 @@ final class ApiTests: XCTestCase {
         FixtureProtocol.declaredLength = nil
     }
     override func tearDown() { session.invalidateAndCancel(); FixtureProtocol.reply = nil }
+    func testRenameUsesNameOnlyAndRequiresConfirmation() async throws {
+        let voice = CatalogItem(id: "own", name: "Original", data: ["category": "cloned", "is_owner": true])
+        FixtureProtocol.reply = { request in
+            XCTAssertEqual(request.httpMethod, "POST"); XCTAssertEqual(request.url?.path, "/v1/voices/own/edit")
+            XCTAssertTrue(request.value(forHTTPHeaderField: "Content-Type")?.hasPrefix("multipart/form-data") == true)
+            let body = String(data: try FixtureProtocol.body(request), encoding: .utf8)!
+            XCTAssertTrue(body.contains("name=\"name\"") && body.contains("Renamed"))
+            for field in ["filename=", "description", "labels"] { XCTAssertFalse(body.contains(field)) }
+            return (200, "application/json", Data("{\"status\":\"ok\"}".utf8))
+        }
+        try await VoiceNames.rename(voice, to: "Renamed", service: api)
+        XCTAssertEqual(voice.name, "Original")
+        FixtureProtocol.reply = { _ in (200, "application/json", Data("{\"status\":\"unexpected\"}".utf8)) }
+        do { try await VoiceNames.rename(voice, to: "Renamed", service: api); XCTFail("Unconfirmed rename accepted") } catch { }
+    }
     func testSpeechRequest() async throws {
         var p = SpeechProject(); p.voiceId = "voice-a"; p.text = "Hello"
         FixtureProtocol.reply = { r in

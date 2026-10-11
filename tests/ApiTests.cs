@@ -18,6 +18,13 @@ namespace ElevenLabsSpeechGenerator
             ServicePointManager.Expect100Continue = false;
             var folder = Path.Combine(AppPaths.AppFolder, "ApiFixtures"); Directory.CreateDirectory(folder);
             var p = new SpeechProject { VoiceId = "voice-a", Text = "Hello" };
+            var renameVoice = new NamedItem { Id = "owned", Name = "Original", Data = new Dictionary<string, object> { { "is_owner", true }, { "category", "cloned" } } };
+            Serve(c => VoiceNames.Rename(c, renameVoice, "Renamed", CancellationToken.None), "application/json", Encoding.UTF8.GetBytes("{\"status\":\"ok\"}"), (request, body) => {
+                Check(request.StartsWith("POST /v1/voices/owned/edit ") && request.Contains("multipart/form-data"), "Rename must use the edit endpoint and multipart form.");
+                Check(body.Contains("name=\"name\"") && body.Contains("Renamed") && !body.Contains("filename=") && !body.Contains("description") && !body.Contains("labels"), "Rename must not replace samples or metadata.");
+            });
+            Check(renameVoice.Name == "Original", "The API operation must leave local metadata untouched until its caller confirms success.");
+            Serve(c => { bool renameRejected = false; try { VoiceNames.Rename(c, renameVoice, "Renamed", CancellationToken.None); } catch (InvalidDataException) { renameRejected = true; } Check(renameRejected, "An unconfirmed rename must be rejected."); }, "application/json", Encoding.UTF8.GetBytes("{\"status\":\"unexpected\"}"), null);
             var dub = new DubbingJob { UseUrl = true, SourceUrl = "https://example.invalid/source.mp3", TargetLanguage = "es", Name = "Test dub" };
             Serve(c => new DubbingService(c).Create(dub, CancellationToken.None), "application/json", Encoding.UTF8.GetBytes("{\"project_id\":\"proj_test\",\"language_ids\":[\"lang_test\"],\"status\":\"queued\"}"), (request, body) =>
             {
@@ -120,7 +127,7 @@ namespace ElevenLabsSpeechGenerator
                     foreach (var line in header.Split(new[] { "\r\n" }, StringSplitOptions.None)) if (line.StartsWith("Content-Length:", StringComparison.OrdinalIgnoreCase)) length = int.Parse(line.Substring(15).Trim());
                     if (length > 1024 * 1024) throw new Exception("Fixture body too large");
                     var body = new byte[length]; int read = 0; while (read < length) { int n = stream.Read(body, read, length - read); if (n == 0) throw new EndOfStreamException(); read += n; }
-                    if (inspect != null) inspect(header.Split('\r')[0], Encoding.UTF8.GetString(body));
+                    if (inspect != null) inspect(header, Encoding.UTF8.GetString(body));
                     var response = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Fixture\r\nContent-Type: " + type + "\r\nContent-Length: " + payload.Length + "\r\nConnection: close\r\n" + (status == 302 ? "Location: https://example.invalid/\r\n" : "") + "\r\n");
                     stream.Write(response, 0, response.Length); stream.Write(payload, 0, payload.Length);
                 }

@@ -34,6 +34,9 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
     private var drafts: [String: SpeechProject] = [:]
     private var projectURL: URL?
     private let playback = AudioPlayback()
+    lazy var voiceAudition = VoiceAudition(play: { [weak self] url in self?.play(url) },
+        stop: { [weak self] in self?.stop() }, isPlaying: { [weak self] in self?.playback.isPlaying == true },
+        failed: { [weak self] error in self?.showResult("Voice preview", error.localizedDescription) })
     var cursor = ""
     var previewFiles: [URL] = []
     weak var promptView: TabAwareTextView?
@@ -264,7 +267,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
     func chooseAudio() { let p = NSOpenPanel(); if p.runModal() == .OK, let url = p.url { project.inputFile = url.path } }
     func flushDrafts() { drafts[String(project.mode.rawValue)] = project; drafts["Last"] = project; do { try DraftStore.save(drafts); preferences.save() } catch { log("Could not save drafts: \(error.localizedDescription)") } }
     private func scheduleDrafts() { guard draftsReady else { return }; draftTask?.cancel(); draftTask = Task { do { try await Task.sleep(for: .milliseconds(1500)); self.flushDrafts(); self.draftTask = nil } catch { } } }
-    func shutdown() { ContextHelp.shared.stop(); draftsReady = false; draftTask?.cancel(); task?.cancel(); balanceTask?.cancel(); updateTask?.cancel(); stop(); flushDrafts(); for url in previewFiles { try? FileManager.default.removeItem(at: url) } }
+    func shutdown() { ContextHelp.shared.stop(); draftsReady = false; draftTask?.cancel(); task?.cancel(); balanceTask?.cancel(); updateTask?.cancel(); voiceAudition.stop(); stop(); flushDrafts(); for url in previewFiles { try? FileManager.default.removeItem(at: url) } }
     func checkUpdates(automatic: Bool = false) {
         guard updateTask == nil else { return }
         updateTask = Task { defer { updateTask = nil }; do {

@@ -9,9 +9,22 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class SpeechTags
     {
-        public const string GuideUrl = "https://elevenlabs.io/docs/best-practices/prompting";
+        public const string GuideUrl = "https://elevenlabs.io/blog/elevenlabs-audio-tags-list";
         private const int MaximumCustomTags = 200;
-        public static readonly string[] Examples = { "curious", "crying", "mischievously", "whispers", "shouts", "laughs", "clears throat", "sighs", "excited", "sarcastic", "exhales" };
+        public static readonly string[] Examples = {
+            "curious", "crying", "mischievously", "whispers", "shouts", "laughs", "clears throat", "sighs",
+            "excited", "sarcastic", "exhales", "playful", "amazed", "powerful", "proud", "optimistic",
+            "startled", "mad", "aggressive", "bitter", "critical", "repelled", "anxious", "stressed",
+            "scared", "threatened", "vulnerable", "confused", "busy", "tired", "bored", "distant",
+            "despair", "let down", "peaceful", "content", "thoughtful", "trusting", "softly", "quietly",
+            "low", "threatening", "slowly", "rushed", "pause", "drawn out", "gasps", "British accent",
+            "French accent", "Australian accent", "pirate voice", "thunder rumbling", "footsteps", "door creaking", "clapping", "warm",
+            "long pause", "building", "Gong sounds", "whispered in a British accent", "uncertain", "nervous laugh", "delighted", "crowd applause",
+            "amused", "door slams", "happy", "sad", "angry", "whisper", "annoyed", "appalled",
+            "surprised", "laughing", "chuckles", "short pause", "exhales sharply", "inhales deeply", "singing", "muttering",
+            "whispering", "shouting", "low, gravelly voice",
+            "laughs harder", "starts laughing", "wheezing", "snorts", "gunshot", "applause", "explosion", "swallows", "gulps", "strong French accent", "sings", "woo", "fart"
+        };
         private static string PathName { get { return Path.Combine(AppPaths.UserFolder, "SpeechTags.json"); } }
         public static string Normalize(string value)
         {
@@ -50,11 +63,11 @@ namespace ElevenLabsSpeechGenerator
                 {
                     var layout = Ui.Layout(2);
                     var search = Ui.Text("Search tags", false);
-                    var list = new ListBox { AccessibleName = "Speech tags", Dock = DockStyle.Fill, Height = 180 };
+                    var list = new PrefixListBox { AccessibleName = "Speech tags", Dock = DockStyle.Fill, Height = 180 };
                     var custom = Ui.Text("Custom tag", false); custom.MaxLength = 66;
                     var remove = Ui.Button("&Remove custom tag", () => { });
                     Action refresh = () => { var selected = Convert.ToString(list.SelectedItem); list.Items.Clear(); list.Items.AddRange(Examples.Concat(customs).Distinct(StringComparer.OrdinalIgnoreCase).Where(x => x.IndexOf(search.Text, StringComparison.OrdinalIgnoreCase) >= 0).OrderBy(x => x).Cast<object>().ToArray()); if (list.Items.Contains(selected)) list.SelectedItem = selected; else if (list.Items.Count > 0) list.SelectedIndex = 0; };
-                    search.TextChanged += delegate { refresh(); };
+                    search.TextChanged += delegate { list.ResetSearch(); refresh(); };
                     list.SelectedIndexChanged += delegate { custom.Text = Convert.ToString(list.SelectedItem); remove.Enabled = customs.Contains(custom.Text, StringComparer.OrdinalIgnoreCase); };
                     Ui.Row(layout, "&Search tags:", search); Ui.Row(layout, "", list); Ui.Row(layout, "&Tag text:", custom);
                     var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };

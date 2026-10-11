@@ -3,17 +3,18 @@ import AppKit
 @MainActor
 enum VersionHistory {
     static let text = """
+    1.2.0
+
+    - Voice Library can automatically preview selected voices; Return or Preview / Stop toggles playback.
+    - Rename voices owned by your account without changing their IDs or recordings.
+    - Expanded the speech-tag picker with current official examples.
+    - Fixed Tab and Shift-Tab navigation through the speech-tag picker.
+
     1.1.1
 
     Version History is now available from the Help menu, including when offline.
     The app opens with keyboard focus in the main text editor when the selected mode has one.
 
-    1.1.0
-
-    - Optional long-text speech generation uses sentence-aware splitting, assembles one WAV per variation and can recover completed parts.
-    - Voice cloning shows readable upload progress and the final result.
-    - Windows context help provides specific explanations for cloning controls, Preferences and other dialogs.
-    - The Mac variations field accepts a typed number.
     """
 
     static func make() -> (NSAlert, NSTextView) {

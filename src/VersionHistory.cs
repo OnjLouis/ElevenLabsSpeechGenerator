@@ -6,16 +6,16 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class VersionHistory
     {
-        internal static readonly string Text = "1.1.1" + Environment.NewLine +
+        internal static readonly string Text = "1.2.0" + Environment.NewLine +
             "" + Environment.NewLine +
-            "Version History is now available from the Help menu, including when offline." + Environment.NewLine +
+            "- Voice Library can automatically preview selected voices; Enter or Preview / Stop toggles playback." + Environment.NewLine +
+            "- Rename voices owned by your account without changing their IDs or recordings." + Environment.NewLine +
+            "- Expanded the speech-tag picker with current official examples." + Environment.NewLine +
+            "- Voice dropdowns and the speech-tag list now accept multi-letter typing navigation." + Environment.NewLine +
             "" + Environment.NewLine +
-            "1.1.0" + Environment.NewLine +
+            "1.1.1" + Environment.NewLine +
             "" + Environment.NewLine +
-            "- Optional long-text speech generation uses sentence-aware splitting, assembles one WAV per variation and can recover completed parts." + Environment.NewLine +
-            "- Voice cloning shows readable upload progress and the final result." + Environment.NewLine +
-            "- Windows context help provides specific explanations for cloning controls, Preferences and other dialogs." + Environment.NewLine +
-            "- The Mac variations field accepts a typed number.";
+            "Version History is now available from the Help menu, including when offline.";
 
         internal static ApiKeyTestResultForm CreateDialog()
         {

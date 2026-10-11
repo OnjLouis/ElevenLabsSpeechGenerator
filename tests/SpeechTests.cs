@@ -34,7 +34,7 @@ namespace ElevenLabsSpeechGenerator
             {
                 var help = form.MainMenuStrip.Items.OfType<System.Windows.Forms.ToolStripMenuItem>().First(x => x.Text.Replace("&", "") == "Help");
                 Check(help.DropDownItems.OfType<System.Windows.Forms.ToolStripMenuItem>().Any(x => x.Text.Replace("&", "").Equals("Version history...", StringComparison.OrdinalIgnoreCase)), "Help must contain Version History.");
-                Check(VersionHistory.Text.StartsWith(Program.Version + Environment.NewLine + Environment.NewLine) && VersionHistory.Text.Contains(Environment.NewLine + Environment.NewLine + "1.1.0" + Environment.NewLine), "History must show this version before the previous release.");
+                Check(VersionHistory.Text.StartsWith(Program.Version + Environment.NewLine + Environment.NewLine) && VersionHistory.Text.Contains(Environment.NewLine + Environment.NewLine + "1.1.1" + Environment.NewLine), "History must show this version before the previous release.");
                 Check(!VersionHistory.Text.Contains("\\n") && !VersionHistory.Text.Replace("\r\n", "").Contains("\n"), "History must use native Windows line breaks.");
                 using (var dialog = VersionHistory.CreateDialog())
                 {
@@ -139,6 +139,10 @@ namespace ElevenLabsSpeechGenerator
                         Check(form.Owner == owner && !form.ShowInTaskbar, "Tag picker must remain an owned dialog");
                         CheckHelpCoverage(form);
                         var controls = Descendants(form).ToArray();
+                        var tags = controls.OfType<System.Windows.Forms.ListBox>().Single();
+                        tags.Focus();
+                        foreach (char letter in "chu") SendMessage(tags.Handle, 0x0102, new IntPtr(letter), IntPtr.Zero);
+                        Check(Convert.ToString(tags.SelectedItem) == "chuckles" && tags.Focused, "Typing chu must find chuckles without leaving the tag list.");
                         var keys = controls.Where(x => x.Text.Contains("&") && (x is System.Windows.Forms.Button || x is System.Windows.Forms.Label)).Select(x => char.ToLowerInvariant(x.Text[x.Text.IndexOf('&') + 1])).ToArray();
                         Check(keys.Distinct().Count() == keys.Length, "Tag picker mnemonics collide");
                         var custom = controls.OfType<System.Windows.Forms.TextBox>().First(x => x.AccessibleName == "Custom tag");
@@ -193,11 +197,14 @@ namespace ElevenLabsSpeechGenerator
         }
         private static void RunChecks()
         {
+            Check(typeof(AppSettings).GetField("AutoPreviewVoices") != null, "Voice library automatic preview must be persisted and opt-in.");
+            Check(SpeechTags.Examples.Contains("long pause") && SpeechTags.Examples.Contains("British accent"), "The tag picker must include current documented examples.");
             TestVersionHistoryMenu();
             TestStartupArguments();
             TestCloneDialog();
             count += LongSpeechTests.Run();
             TestSpeechTags();
+            count += VoiceLibraryTests.Run();
             var owned = new NamedItem { Id = "owned", Name = "Owned", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", true } } };
             var sharedVoice = new NamedItem { Id = "shared", Name = "Shared", Data = new Dictionary<string, object> { { "category", "professional" }, { "is_owner", false } } };
             Check(VoiceGroups.Matches(owned, "Your voices") && !VoiceGroups.Matches(sharedVoice, "Your voices"), "Voice ownership filtering is incorrect");
@@ -489,6 +496,16 @@ namespace ElevenLabsSpeechGenerator
             const int CharacterMessage = 0x0102;
             const int KeyDownMessage = 0x0100;
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            using (var form = new MainForm(null))
+            using (var host = new System.Windows.Forms.Form { StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = new System.Drawing.Point(-2000, -2000) })
+            {
+                var combo = (System.Windows.Forms.ComboBox)typeof(MainForm).GetField("voice", flags).GetValue(form);
+                host.Controls.Add(combo); host.Show(); combo.Items.Clear();
+                foreach (var name in new[] { "Amy", "Andre Louis", "Andrew", "Narrator" }) combo.Items.Add(new NamedItem { Name = name });
+                combo.SelectedIndex = 3; combo.Focus();
+                foreach (char letter in "andre l") SendMessage(combo.Handle, CharacterMessage, new IntPtr(letter), IntPtr.Zero);
+                Check(Convert.ToString(combo.SelectedItem) == "Andre Louis" && combo.Focused, "The main voice dropdown must accept a complete multi-letter name including spaces.");
+            }
             using (var player = new Playback())
             using (var form = new CatalogForm("Voices", new SpeechClient(""), new AppSettings(), player, new SpeechProject()))
             using (var host = new System.Windows.Forms.Form { StartPosition = System.Windows.Forms.FormStartPosition.Manual, Location = new System.Drawing.Point(-2000, -2000) })

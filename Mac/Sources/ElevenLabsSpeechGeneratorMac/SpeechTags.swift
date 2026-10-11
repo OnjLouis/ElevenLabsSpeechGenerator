@@ -1,8 +1,21 @@
 import AppKit
 
 enum SpeechTags {
-    static let guideURL = URL(string: "https://elevenlabs.io/docs/best-practices/prompting")!
-    static let examples = ["curious", "crying", "mischievously", "whispers", "shouts", "laughs", "clears throat", "sighs", "excited", "sarcastic", "exhales"]
+    static let guideURL = URL(string: "https://elevenlabs.io/blog/elevenlabs-audio-tags-list")!
+    static let examples = [
+        "curious", "crying", "mischievously", "whispers", "shouts", "laughs", "clears throat", "sighs",
+        "excited", "sarcastic", "exhales", "playful", "amazed", "powerful", "proud", "optimistic",
+        "startled", "mad", "aggressive", "bitter", "critical", "repelled", "anxious", "stressed",
+        "scared", "threatened", "vulnerable", "confused", "busy", "tired", "bored", "distant",
+        "despair", "let down", "peaceful", "content", "thoughtful", "trusting", "softly", "quietly",
+        "low", "threatening", "slowly", "rushed", "pause", "drawn out", "gasps", "British accent",
+        "French accent", "Australian accent", "pirate voice", "thunder rumbling", "footsteps", "door creaking", "clapping", "warm",
+        "long pause", "building", "Gong sounds", "whispered in a British accent", "uncertain", "nervous laugh", "delighted", "crowd applause",
+        "amused", "door slams", "happy", "sad", "angry", "whisper", "annoyed", "appalled",
+        "surprised", "laughing", "chuckles", "short pause", "exhales sharply", "inhales deeply", "singing", "muttering",
+        "whispering", "shouting", "low, gravelly voice",
+        "laughs harder", "starts laughing", "wheezing", "snorts", "gunshot", "applause", "explosion", "swallows", "gulps", "strong French accent", "sings", "woo", "fart"
+    ]
     static func normalize(_ value: String) throws -> String {
         var tag = value.trimmingCharacters(in: .whitespacesAndNewlines)
         if tag.hasPrefix("["), tag.hasSuffix("]"), tag.count > 1 { tag = String(tag.dropFirst().dropLast()).trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -70,8 +83,23 @@ enum SpeechTags {
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: root.leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: root.trailingAnchor, constant: -16), stack.topAnchor.constraint(equalTo: root.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: root.bottomAnchor, constant: -16), search.widthAnchor.constraint(equalTo: stack.widthAnchor), scroll.widthAnchor.constraint(equalTo: stack.widthAnchor), scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 180), custom.widthAnchor.constraint(equalTo: stack.widthAnchor)])
         let chain: [NSView] = [search, table, custom, insert, save, remove, guide, close]
         for index in chain.indices { chain[index].nextKeyView = chain[(index + 1) % chain.count] }
+        // NSSearchField's internal key loop can trap Tab; traverse the dialog's actual controls.
+        panel.tabAction = { [weak panel] backwards in
+            guard let panel else { return }
+            let active = chain.firstIndex { view in
+                view === panel.firstResponder || (view as? NSTextField)?.currentEditor() === panel.firstResponder
+            } ?? 0
+            let step = backwards ? -1 : 1
+            for offset in 1...chain.count {
+                let index = (active + step * offset + chain.count) % chain.count
+                let view = chain[index]
+                if let control = view as? NSControl, !control.isEnabled { continue }
+                if !view.isHidden, panel.makeFirstResponder(view) { break }
+            }
+        }
         refresh(); panel.center(); panel.makeKeyAndOrderFront(nil); panel.makeFirstResponder(search)
         NSApp.runModal(for: panel); panel.orderOut(nil)
+        panel.tabAction = nil
         if let owner, owner.isVisible { owner.makeKeyAndOrderFront(nil); if let responder { owner.makeFirstResponder(responder) } }
         return result
     }

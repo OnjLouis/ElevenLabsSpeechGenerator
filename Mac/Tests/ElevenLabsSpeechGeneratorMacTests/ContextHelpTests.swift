@@ -3,6 +3,14 @@ import XCTest
 @testable import ElevenLabsSpeechGeneratorMac
 
 final class ContextHelpTests: XCTestCase {
+    @MainActor func testRenameFieldHelp() {
+        let text = ContextHelp.description(title: "New voice name", hint: nil)
+        XCTAssertTrue(text.contains("voice ID"))
+        XCTAssertTrue(text.contains("samples"))
+        let clone = ContextHelp.description(title: "Voice name", hint: nil)
+        XCTAssertTrue(clone.contains("new cloned voice"))
+        XCTAssertFalse(clone.contains("Renaming"))
+    }
     @MainActor func testApplicationAccessibilityFocusGetter() {
         let app = NSApplication.shared
         XCTAssertTrue(app.responds(to: NSSelectorFromString("accessibilityFocusedUIElement")))

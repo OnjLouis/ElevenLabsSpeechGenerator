@@ -39,6 +39,7 @@ struct FocusedHelpContent {
 
 final class HelpPanel: NSPanel {
     var finish: (() -> Void)?
+    var tabAction: ((Bool) -> Void)?
     var manualButton: NSButton?
     var closeButton: NSButton?
     override func sendEvent(_ event: NSEvent) {
@@ -48,7 +49,8 @@ final class HelpPanel: NSPanel {
                 finish?(); return
             }
             if event.keyCode == 48 && (modifiers.isEmpty || modifiers == .shift) {
-                if modifiers == .shift { selectPreviousKeyView(nil) } else { selectNextKeyView(nil) }
+                if let tabAction { tabAction(modifiers == .shift) }
+                else if modifiers == .shift { selectPreviousKeyView(nil) } else { selectNextKeyView(nil) }
                 return
             }
         }
@@ -61,6 +63,8 @@ final class HelpPanel: NSPanel {
 @MainActor final class ContextHelp: NSObject {
     static func description(title: String, hint: String?) -> String {
         switch title.lowercased() {
+        case "new voice name": return "The name displayed for this voice in your account. Renaming changes its name, not its voice ID, samples or settings. Saving requires Voices Write permission; cancelling leaves the current name unchanged."
+        case "voice name": return "Choose the name displayed for the new cloned voice in your account. Creating a voice requires recordings of the same speaker, permission to use those recordings and Voices Write access."
         case "api key": return "An ElevenLabs key is a private credential that lets this app use your account. Create one on the ElevenLabs API keys page, allow the features you need, then paste it in Settings and choose Save API Key. Test API Key checks Models, Voices and balance read access without generating audio. Never share your key; requests may spend your credits."
         case "stability": return "Controls consistency of delivery. Lower values allow more emotional variation but can produce uneven results; higher values are steadier and may sound less expressive. For a numeric field, zero to one is the full range. Eleven v3 and Dialogue offer Creative, Natural and Robust choices."
         case "similarity": return "Controls how closely the result preserves the selected voice's character, from zero to one. Higher is not always better; compare short generations if the voice sounds unnatural."

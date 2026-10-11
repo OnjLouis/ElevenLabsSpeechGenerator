@@ -12,6 +12,7 @@ namespace ElevenLabsSpeechGenerator
         public bool CompletionSound = true;
         public int PlaybackDevice = -1;
         public bool AutoPlayGenerations;
+        public bool AutoPreviewVoices;
         public string DefaultOutputFormat = "mp3_44100_128";
         public string VoiceGroup = "All voices";
         public bool SaveDetails = true;
@@ -31,6 +32,7 @@ namespace ElevenLabsSpeechGenerator
             if (bool.TryParse(ini.Get("General", "AllowLongSpeech", "false"), out b)) s.AllowLongSpeech = b;
             if (int.TryParse(ini.Get("General", "PlaybackDevice", "-1"), out n)) s.PlaybackDevice = n;
             if (bool.TryParse(ini.Get("Audio", "AutoPlayGenerations", "false"), out b)) s.AutoPlayGenerations = b;
+            if (bool.TryParse(ini.Get("Audio", "AutoPreviewVoices", "false"), out b)) s.AutoPreviewVoices = b;
             var format = ini.Get("Audio", "DefaultOutputFormat", s.DefaultOutputFormat);
             if (Array.IndexOf(SpeechProject.OutputFormats, format) >= 0) s.DefaultOutputFormat = format;
             if (DateTime.TryParse(ini.Get("Updates", "LastCheckUtc", ""), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out d)) s.LastUpdateCheckUtc = d;
@@ -64,6 +66,7 @@ namespace ElevenLabsSpeechGenerator
         {
             var ini = new IniFile(); var folder = DefaultOutputFolder;
             ini.Set("Audio", "AutoPlayGenerations", AutoPlayGenerations.ToString());
+            ini.Set("Audio", "AutoPreviewVoices", AutoPreviewVoices.ToString());
             ini.Set("Audio", "DefaultOutputFormat", DefaultOutputFormat);
             ini.Set("General", "VoiceGroup", VoiceGroup);
             ini.Set("General", "AllowLongSpeech", AllowLongSpeech.ToString());

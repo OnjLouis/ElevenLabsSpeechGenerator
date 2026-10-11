@@ -35,11 +35,55 @@ final class SpeechTagTests: XCTestCase {
             guard let window = NSApp.windows.first(where: { $0.title == "Insert Speech Tag" }), let root = window.contentView else { XCTFail("Picker did not open"); NSApp.stopModal(); return }
             let views = children(root)
             XCTAssertTrue(window.isExcludedFromWindowsMenu)
+            let table = views.compactMap { $0 as? NSTableView }.first!
+            let search = views.compactMap { $0 as? NSSearchField }.first!
+            let customField = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom tag" }!
+            window.makeFirstResponder(search)
+            let tab = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48)!
+            window.sendEvent(tab)
+            XCTAssertTrue(window.firstResponder === table, "Tab from search must focus the tag list.")
+            window.sendEvent(tab)
+            XCTAssertTrue(customField.currentEditor() === window.firstResponder, "Tab from the list must focus the custom tag.")
+            window.sendEvent(tab)
+            XCTAssertEqual((window.firstResponder as? NSButton)?.title, "Insert", "Tab from custom tag must reach Insert.")
+            for title in ["Save Custom Tag", "Official Guide", "Close"] {
+                window.sendEvent(tab)
+                XCTAssertEqual((window.firstResponder as? NSButton)?.title, title, "Tab must visit enabled actions and skip disabled Remove.")
+            }
+            window.sendEvent(tab)
+            XCTAssertTrue(search.currentEditor() === window.firstResponder, "Tab from Close must wrap to Search.")
+            let backTab = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: .shift, timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, characters: "\t", charactersIgnoringModifiers: "\t", isARepeat: false, keyCode: 48)!
+            for title in ["Close", "Official Guide", "Save Custom Tag", "Insert"] {
+                window.sendEvent(backTab)
+                XCTAssertEqual((window.firstResponder as? NSButton)?.title, title, "Shift-Tab must traverse enabled actions in reverse.")
+            }
+            window.sendEvent(backTab)
+            XCTAssertTrue(customField.currentEditor() === window.firstResponder)
+            window.sendEvent(backTab)
+            XCTAssertTrue(window.firstResponder === table)
+            window.sendEvent(backTab)
+            XCTAssertTrue(search.currentEditor() === window.firstResponder)
+            window.makeFirstResponder(table)
+            for letter in "chu" {
+                let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, characters: String(letter), charactersIgnoringModifiers: String(letter), isARepeat: false, keyCode: 0)!
+                table.keyDown(with: event)
+            }
+            XCTAssertEqual((table.view(atColumn: 0, row: table.selectedRow, makeIfNecessary: true) as? NSTextField)?.stringValue, "chuckles")
+            XCTAssertTrue(window.firstResponder === table)
             let custom = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom tag" }!
             XCTAssertTrue(ContextHelp.description(title: "Custom tag", hint: nil).contains("without replacing"))
             custom.stringValue = "my test direction"
             activate("Save Custom Tag", in: views)
             XCTAssertEqual(defaults.stringArray(forKey: "customSpeechTags"), ["my test direction"])
+            let savedRow = (0..<table.numberOfRows).first { row in
+                (table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NSTextField)?.stringValue == "my test direction"
+            }!
+            table.selectRowIndexes(IndexSet(integer: savedRow), byExtendingSelection: false)
+            window.makeFirstResponder(custom)
+            for title in ["Insert", "Save Custom Tag", "Remove Custom Tag"] {
+                window.sendEvent(tab)
+                XCTAssertEqual((window.firstResponder as? NSButton)?.title, title, "Saved custom tags must expose Remove in the Tab order.")
+            }
             activate("Insert", in: views)
         }
         let guardWork = DispatchWorkItem { XCTFail("Picker timed out"); NSApp.stopModal() }

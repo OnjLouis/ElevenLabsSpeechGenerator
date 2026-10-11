@@ -28,7 +28,7 @@ namespace ElevenLabsSpeechGenerator
         private bool dubbingOpen;
         private static readonly SpeechMode[] Modes = { SpeechMode.TextToSpeech, SpeechMode.Dialogue, SpeechMode.Transcription, SpeechMode.VoiceChanger, SpeechMode.VoiceDesign, SpeechMode.VoiceIsolation, SpeechMode.ForcedAlignment, SpeechMode.VoiceRemix };
         private readonly ComboBox mode = Ui.Combo("Mode", new object[] { "Text to speech", "Dialogue", "Transcription", "Voice changer", "Voice design", "Voice isolation", "Transcript alignment", "Voice remix" });
-        private readonly ComboBox voice = Ui.Combo("Voice", new object[0]);
+        private readonly PrefixComboBox voice = new PrefixComboBox { AccessibleName = "Voice", DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 };
         private readonly ComboBox voiceGroup = Ui.Combo("Voice group", VoiceGroups.Names.Cast<object>().ToArray());
         private readonly ComboBox model = Ui.Combo("Model", new object[0]);
         private readonly ComboBox format = Ui.Combo("Output format", SpeechProject.OutputFormats.Cast<object>().ToArray());
@@ -216,7 +216,7 @@ namespace ElevenLabsSpeechGenerator
             var choices = voices.Where(x => VoiceGroups.Matches(x, settings.VoiceGroup)).ToList();
             var current = voices.FirstOrDefault(x => x.Id == project.VoiceId);
             if (current != null && choices.All(x => x.Id != current.Id)) choices.Add(new NamedItem { Id = current.Id, Name = current.Name + " (current, outside group)", Data = current.Data });
-            voice.Items.Clear(); voice.Items.AddRange(choices.Cast<object>().ToArray()); Select(voice, project.VoiceId);
+            voice.ResetSearch(); voice.Items.Clear(); voice.Items.AddRange(choices.Cast<object>().ToArray()); Select(voice, project.VoiceId);
             UpdateVoicePreview();
         }
         private void UpdateVoicePreview() { previewVoice.Enabled = operation == null && voice.Enabled && VoicePreview.Url(voice.SelectedItem as NamedItem) != null; }
@@ -388,7 +388,12 @@ namespace ElevenLabsSpeechGenerator
         private void Catalog(string kind)
         {
             if (operation != null) return;
-            using (var f = new CatalogForm(kind, Client(), settings, playback, project)) { f.ShowDialog(this); if (f.SelectedVoice != null) { project.VoiceId = f.SelectedVoice.Id; voices.Add(f.SelectedVoice); voice.Items.Add(f.SelectedVoice); voice.SelectedItem = f.SelectedVoice; } }
+            using (var f = new CatalogForm(kind, Client(), settings, playback, project)) {
+                f.ShowDialog(this);
+                foreach (var item in voices) { string name; if (f.RenamedVoices.TryGetValue(item.Id, out name)) { item.Name = name; item.Data["name"] = name; } }
+                if (f.RenamedVoices.Count > 0) FillVoices();
+                if (f.SelectedVoice != null) { project.VoiceId = f.SelectedVoice.Id; voices.RemoveAll(x => x.Id == f.SelectedVoice.Id); voices.Add(f.SelectedVoice); FillVoices(); }
+            }
         }
         private void NewProject() { if (operation != null) return; CaptureProject(); drafts[project.Mode.ToString()] = project; project = FreshProject(project.Mode); projectPath = null; Bind(); }
         private SpeechProject FreshProject(SpeechMode selectedMode) { var value = SpeechProject.ForMode(selectedMode); value.OutputFormat = settings.DefaultOutputFormat; return value; }

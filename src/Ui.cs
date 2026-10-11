@@ -23,7 +23,7 @@ namespace ElevenLabsSpeechGenerator
         }
         public static ComboBox Combo(string name, object[] values)
         {
-            var c = new ComboBox { AccessibleName = name, DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 }; c.Items.AddRange(values); if (values.Length > 0) c.SelectedIndex = 0; return c;
+            var c = new PrefixComboBox { AccessibleName = name, DropDownStyle = ComboBoxStyle.DropDownList, Width = 200 }; c.Items.AddRange(values); if (values.Length > 0) c.SelectedIndex = 0; return c;
         }
         public static TextBox Text(string name, bool multiline)
         {

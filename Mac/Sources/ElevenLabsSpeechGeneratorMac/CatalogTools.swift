@@ -6,6 +6,7 @@ extension AppModel {
     func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; if kind == .clone { cloneCreated = false; cloneStatus = "Ready. Add samples and confirm consent before creating a voice." }; tool = kind; catalog = []; selectedCatalog = []; cursor = ""; search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
     func refreshTool(next: Bool = false) {
         guard let kind = tool, !next || !cursor.isEmpty else { return }; let page = next ? cursor : "", query = Self.escape(search), shared = sharedVoices
+        if kind == .voices { voiceAudition.stop() }
         run("Loading \(kind.rawValue)") {
             let path: String
             switch kind {
@@ -35,7 +36,24 @@ extension AppModel {
         }
     }
     func previewVoice() {
-        playVoicePreview(catalogSelection)
+        voiceAudition.toggle(catalogSelection)
+    }
+    func catalogVoiceChanged() {
+        guard tool == .voices else { return }
+        voiceAudition.select(catalogSelection, automatic: preferences.autoPreviewVoices == true)
+    }
+    var canRenameVoice: Bool { !busy && !sharedVoices && VoiceNames.canRename(catalogSelection) }
+    func renameVoice() {
+        guard canRenameVoice, let voice = catalogSelection,
+              let value = ask("Rename voice", message: "New voice name", initial: voice.name) else { return }
+        let name: String
+        do { name = try VoiceNames.validate(value) } catch { showResult("Could not rename voice", error.localizedDescription); return }
+        guard name != voice.name else { return }
+        run("Renaming voice") {
+            try await VoiceNames.rename(voice, to: name, service: self.service())
+            for index in self.catalog.indices where self.catalog[index].id == voice.id { self.catalog[index].name = name; self.catalog[index].data["name"] = name }
+            for index in self.voices.indices where self.voices[index].id == voice.id { self.voices[index].name = name; self.voices[index].data["name"] = name }
+        }
     }
     var canPreviewSelectedVoice: Bool { !busy && project.mode.needsVoice && VoicePreview.url(voices.first { $0.id == project.voiceId }) != nil }
     func previewSelectedVoice() { if canPreviewSelectedVoice { playVoicePreview(voices.first { $0.id == project.voiceId }) } }
