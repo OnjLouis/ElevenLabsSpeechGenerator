@@ -26,6 +26,11 @@ final class SpeechTagTests: XCTestCase {
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         func children(_ root: NSView) -> [NSView] { [root] + root.subviews.flatMap(children) }
+        func activate(_ title: String, in views: [NSView]) {
+            guard let button = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == title }),
+                  button.isEnabled, let action = button.action else { XCTFail("Missing enabled action: \(title)"); NSApp.stopModal(); return }
+            XCTAssertTrue(NSApp.sendAction(action, to: button.target, from: button))
+        }
         let choose = DispatchWorkItem {
             guard let window = NSApp.windows.first(where: { $0.title == "Insert Speech Tag" }), let root = window.contentView else { XCTFail("Picker did not open"); NSApp.stopModal(); return }
             let views = children(root)
@@ -33,9 +38,9 @@ final class SpeechTagTests: XCTestCase {
             let custom = views.compactMap { $0 as? NSTextField }.first { $0.accessibilityLabel() == "Custom tag" }!
             XCTAssertTrue(ContextHelp.description(title: "Custom tag", hint: nil).contains("without replacing"))
             custom.stringValue = "my test direction"
-            views.compactMap { $0 as? NSButton }.first { $0.title == "Save Custom Tag" }!.performClick(nil)
+            activate("Save Custom Tag", in: views)
             XCTAssertEqual(defaults.stringArray(forKey: "customSpeechTags"), ["my test direction"])
-            views.compactMap { $0 as? NSButton }.first { $0.title == "Insert" }!.performClick(nil)
+            activate("Insert", in: views)
         }
         let guardWork = DispatchWorkItem { XCTFail("Picker timed out"); NSApp.stopModal() }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: choose)
