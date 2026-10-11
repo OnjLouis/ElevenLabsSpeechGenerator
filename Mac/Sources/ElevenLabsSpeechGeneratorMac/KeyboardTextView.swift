@@ -4,6 +4,20 @@ import SwiftUI
 final class TabAwareTextView: NSTextView {
     var tabAction: (() -> Void)?
     var backTabAction: (() -> Void)?
+    var wantsInitialFocus = false
+    private var assignedInitialFocus = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard wantsInitialFocus, !assignedInitialFocus, let window else { return }
+        assignedInitialFocus = true
+        window.initialFirstResponder = self
+        // SwiftUI can attach the editor after the window's default focus is chosen.
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window, self.window === window, window.isKeyWindow else { return }
+            window.makeFirstResponder(self)
+        }
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 48 && event.modifierFlags.intersection([.command, .option, .control]).isEmpty {
@@ -37,6 +51,7 @@ struct KeyboardTextView: NSViewRepresentable {
     var accessibilityLabel: String
     var accessibilityHelp: String
     var maximumLength: Int? = nil
+    var initialFocus = false
     var onTab: () -> Void
     var onBackTab: () -> Void
     var onReady: (TabAwareTextView) -> Void
@@ -65,6 +80,7 @@ struct KeyboardTextView: NSViewRepresentable {
         editor.delegate = context.coordinator
         editor.tabAction = onTab
         editor.backTabAction = onBackTab
+        editor.wantsInitialFocus = initialFocus
         scroll.documentView = editor
         DispatchQueue.main.async { onReady(editor) }
         return scroll

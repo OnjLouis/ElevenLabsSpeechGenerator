@@ -6,6 +6,7 @@ enum VersionHistory {
     1.1.1
 
     Version History is now available from the Help menu, including when offline.
+    The app opens with keyboard focus in the main text editor when the selected mode has one.
 
     1.1.0
 

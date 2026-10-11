@@ -4,6 +4,7 @@ import SwiftUI
 struct MainView: View {
     @ObservedObject var model: AppModel
     @FocusState private var filenameFocus: Bool
+    @State private var initialFocusPending = true
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -52,7 +53,9 @@ struct MainView: View {
     }
     private func nativeText(_ text: Binding<String>, name: String, hint: String, editable: Bool, height: CGFloat, maximum: Int? = nil, ready: @escaping (TabAwareTextView) -> Void) -> some View {
         KeyboardTextView(text: text, editable: editable, accessibilityLabel: name, accessibilityHelp: hint, maximumLength: maximum,
-                         onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: ready).frame(minHeight: height, maxHeight: height + 80)
+                         initialFocus: editable && initialFocusPending,
+                         onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) },
+                         onReady: { view in ready(view); if editable { initialFocusPending = false } }).frame(minHeight: height, maxHeight: height + 80)
     }
     @ViewBuilder private var options: some View {
         if model.project.mode == .transcription {
