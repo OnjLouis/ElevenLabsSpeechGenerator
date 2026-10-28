@@ -67,7 +67,7 @@ namespace ElevenLabsSpeechGenerator
         {
             Text = Program.AppName; AccessibleName = Text; Size = new Size(1040, 780); MinimumSize = new Size(800, 600); StartPosition = FormStartPosition.CenterScreen;
             project.OutputFormat = settings.DefaultOutputFormat;
-            playback.Failed += ex => { if (!IsDisposed) Ui.Result(this, "Could not play", ex.Message); };
+            playback.Failed += PlaybackFailed;
             playback.Started += path => { if (!IsDisposed) Log("Playing " + Path.GetFileName(path) + "."); };
             Disposed += delegate { playback.Dispose(); };
             var menu = BuildMenu(); MainMenuStrip = menu;
@@ -349,6 +349,18 @@ namespace ElevenLabsSpeechGenerator
         }
         private static void SaveDetails(string folder, string stem, object data) { FileNames.AtomicText(Path.Combine(folder, "Details", stem + ".json"), ReadableJson.Format(JsonData.Encode(data))); }
         private void AddOutput(string path, Dictionary<string, object> data) { outputs.Items.Add(new NamedItem { Id = path, Name = Path.GetFileName(path), Data = data }); outputs.SelectedIndex = outputs.Items.Count - 1; if (outputs.Items.Count > 200) outputs.Items.RemoveAt(0); }
+        private void PlaybackFailed(Exception error)
+        {
+            if (IsDisposed) return;
+            Log("Playback failed: " + error.Message);
+            Form owner = this;
+            while (true) {
+                var child = owner.OwnedForms.LastOrDefault(x => x.Visible && !x.IsDisposed);
+                if (child == null) break;
+                owner = child;
+            }
+            Ui.Result(owner, "Could not play", error.Message);
+        }
         private void StopPlayback() { playback.Stop(); foreach (var path in previewFiles) try { File.Delete(path); } catch (IOException) { } previewFiles.Clear(); }
         private void PlaySelected() { var item = outputs.SelectedItem as NamedItem; if (item == null) return; try { if (Path.GetExtension(item.Id) == ".txt") OpenLink(item.Id); else playback.Play(item.Id, settings.PlaybackDevice); } catch (Exception ex) { Ui.Result(this, "Could not play", ex.Message); } }
         private void SaveSelected() { var item = outputs.SelectedItem as NamedItem; if (item == null) return; using (var d = new SaveFileDialog { FileName = item.Name, Filter = "Audio or text|*" + Path.GetExtension(item.Id), InitialDirectory = settings.DefaultOutputFolder }) if (d.ShowDialog(this) == DialogResult.OK && !string.Equals(d.FileName, item.Id, StringComparison.OrdinalIgnoreCase)) try { File.Copy(item.Id, d.FileName, true); } catch (Exception ex) { Ui.Result(this, "Could not save", ex.Message); } }

@@ -6,7 +6,9 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class VersionHistory
     {
-        internal static readonly string Text = "1.2.1" + Environment.NewLine + Environment.NewLine +
+        internal static readonly string Text = "1.2.2" + Environment.NewLine + Environment.NewLine +
+            "Generation History now displays voice names and full transcripts for current speech and dialogue recordings. Search includes the full transcript on the current page. History playback and downloads retrieve playable WAV files, including recordings originally generated as raw PCM. Windows playback errors appear above the active dialog." + Environment.NewLine + Environment.NewLine +
+            "1.2.1" + Environment.NewLine + Environment.NewLine +
             "Generation History, Voice Library and pronunciation dictionaries now offer Previous Page as well as Next Page. Navigation remains usable after failed requests; Refresh returns to the first page." + Environment.NewLine + Environment.NewLine +
             "1.2.0" + Environment.NewLine +
             "" + Environment.NewLine +

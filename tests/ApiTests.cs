@@ -17,6 +17,8 @@ namespace ElevenLabsSpeechGenerator
         {
             ServicePointManager.Expect100Continue = false;
             TestCatalogPages();
+            TestHistoryMetadata();
+            TestHistoryPlayback();
             var folder = Path.Combine(AppPaths.AppFolder, "ApiFixtures"); Directory.CreateDirectory(folder);
             var p = new SpeechProject { VoiceId = "voice-a", Text = "Hello" };
             var renameVoice = new NamedItem { Id = "owned", Name = "Original", Data = new Dictionary<string, object> { { "is_owner", true }, { "category", "cloned" } } };
@@ -167,6 +169,79 @@ namespace ElevenLabsSpeechGenerator
                 Check(!previous.Enabled && next.Enabled, "Previous did not restore first-page buttons.");
                 ((System.Windows.Forms.TextBox)typeof(CatalogForm).GetField("search", flags).GetValue(form)).Text = "new query";
                 Check(!previous.Enabled && !next.Enabled, "Edited queries must not use stale page tokens.");
+            }
+        }
+        private static void TestHistoryPlayback()
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var folder = Path.Combine(AppPaths.AppFolder, "History playback"); Directory.CreateDirectory(folder);
+            var wave = new MemoryStream(); SpeechClient.WriteWaveHeader(wave, 48000, 1, 9600); wave.Position = 44; wave.Write(new byte[9600], 0, 9600);
+            foreach (var format in new[] { "pcm_48000", "mp3_44100_128" })
+            using (var player = new Playback())
+            using (var form = new CatalogForm("History", new SpeechClient(""), new AppSettings { DefaultOutputFolder = folder }, player, new SpeechProject()))
+            {
+                var list = (System.Windows.Forms.ListBox)typeof(CatalogForm).GetField("list", flags).GetValue(form);
+                list.Items.Add(new NamedItem { Id = "recording", Name = "History fixture", Data = new Dictionary<string, object> { { "output_format", format } } }); list.SelectedIndex = 0;
+                string played = null, requestLine = null, requestBody = null;
+                Playback.TestPlay = (path, device) => played = path;
+                try {
+                    Serve(client => {
+                        typeof(CatalogForm).GetField("client", flags).SetValue(form, client);
+                        var task = (Task)typeof(CatalogForm).GetMethod("DownloadHistory", flags).Invoke(form, new object[] { true });
+                        var clock = System.Diagnostics.Stopwatch.StartNew();
+                        while (!task.IsCompleted && clock.ElapsedMilliseconds < 3000) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(5); }
+                        Check(task.IsCompleted, "History playback request did not finish."); task.GetAwaiter().GetResult();
+                    }, "audio/wav", wave.ToArray(), (request, body) => { requestLine = request.Split('\r')[0]; requestBody = body; });
+                    Check(requestLine.StartsWith("POST /v1/history/download "), "History playback must request a playable WAV export, not raw stored PCM.");
+                    var payload = JsonData.Object(requestBody);
+                    Check(JsonData.String(payload, "output_format") == "wav" && requestBody.Contains("recording"), "History export must specify one recording and WAV.");
+                    Check(played != null && Path.GetExtension(played) == ".wav", "History playback must use the actual WAV extension.");
+                    using (var reader = new NAudio.Wave.WaveFileReader(played)) Check(reader.WaveFormat.SampleRate == 48000 && reader.WaveFormat.Channels == 1 && reader.Length == 9600, "History export lost its playable header, rate, channels or samples.");
+                }
+                finally { Playback.TestPlay = null; }
+            }
+            var rejectedPath = Path.Combine(folder, "rejected.wav");
+            foreach (var invalid in new[] { new byte[16], Encoding.ASCII.GetBytes("PK fake archive instead of a single WAV recording") }) {
+                bool rejected = false;
+                Serve(client => { try { client.DownloadHistory("recording", rejectedPath, CancellationToken.None); } catch (InvalidDataException) { rejected = true; } }, "application/octet-stream", invalid, null);
+                Check(rejected && !File.Exists(rejectedPath) && Directory.GetFiles(folder, "*.partial").Length == 0, "Invalid history exports must be rejected without retaining partial or mislabeled audio.");
+            }
+            var existing = Path.Combine(folder, "existing.wav"); File.WriteAllText(existing, "Keep this recording");
+            Serve(client => { bool rejected = false; try { client.DownloadHistory("recording", existing, CancellationToken.None); } catch (IOException) { rejected = true; } Check(rejected && File.ReadAllText(existing) == "Keep this recording", "History downloads must not overwrite existing recordings."); }, "audio/wav", wave.ToArray(), null);
+        }
+        private static void TestHistoryMetadata()
+        {
+            var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+            var response = "{\"history\":[" +
+                "{\"history_item_id\":\"nested\",\"voice_name\":null,\"text\":null,\"source\":\"TTS\",\"model_id\":\"eleven_v4\",\"dialogue\":[{\"voice_name\":\"Alice\",\"text\":\"First line.\\nSecond line." + new string('x', 200) + "\"},{\"voice_name\":\"Bob\",\"text\":\"Later searchable words.\"}]} ," +
+                "{\"history_item_id\":\"legacy\",\"voice_name\":\"Rachel\",\"text\":\"Older speech.\",\"model_id\":\"eleven_multilingual_v2\"}," +
+                "{\"history_item_id\":\"unnamed\",\"source\":\"STS\",\"date_unix\":1793142000,\"dialogue\":[{\"voice_name\":null,\"text\":\"Words without a voice name.\"}]}," +
+                "{\"history_item_id\":\"empty\",\"voice_name\":null,\"text\":null,\"dialogue\":null,\"source\":\"STS\",\"date_unix\":1793142000}" +
+                "],\"has_more\":false}";
+            using (var player = new Playback())
+            using (var form = new CatalogForm("History", new SpeechClient(""), new AppSettings(), player, new SpeechProject()))
+            {
+                var list = (System.Windows.Forms.ListBox)typeof(CatalogForm).GetField("list", flags).GetValue(form);
+                var details = (System.Windows.Forms.TextBox)typeof(CatalogForm).GetField("description", flags).GetValue(form);
+                Action load = () => Serve(client => {
+                    typeof(CatalogForm).GetField("client", flags).SetValue(form, client);
+                    var task = (Task)typeof(CatalogForm).GetMethod("LoadPage", flags).Invoke(form, new object[] { CatalogPageMove.Refresh });
+                    var clock = System.Diagnostics.Stopwatch.StartNew();
+                    while (!task.IsCompleted && clock.ElapsedMilliseconds < 3000) { System.Windows.Forms.Application.DoEvents(); Thread.Sleep(5); }
+                    Check(task.IsCompleted, "History metadata request timed out."); task.GetAwaiter().GetResult();
+                }, "application/json", Encoding.UTF8.GetBytes(response), null);
+                load();
+                Check(list.Items.Count == 4, "History must retain records with missing optional fields.");
+                var first = (NamedItem)list.Items[0];
+                Check(first.Name.Contains("Alice") && first.Name.Contains("Bob") && first.Name.Contains("First line."), "History must read voice names and speech from dialogue, including TTS records.");
+                Check(!first.Name.Contains("\n") && !first.Name.Contains("\r"), "History labels must be single-line.");
+                Check(details.Text.Contains("Alice: First line.\r\nSecond line.") && details.Text.Contains("Bob: Later searchable words.") && details.Text.Contains("eleven_v4"), "History details must retain every speaker, line and model.");
+                Check(((NamedItem)list.Items[1]).Name == "Rachel - Older speech.", "Legacy history labels must still work.");
+                Check(((NamedItem)list.Items[2]).Name.Contains("Words without a voice name."), "Missing voice names must not discard text.");
+                Check(((NamedItem)list.Items[3]).Name.Contains("Voice conversion") && ((NamedItem)list.Items[3]).Name.Contains("2026"), "Text-free history must have a useful type/date label.");
+                ((System.Windows.Forms.TextBox)typeof(CatalogForm).GetField("search", flags).GetValue(form)).Text = "Later searchable";
+                load();
+                Check(list.Items.Count == 1 && ((NamedItem)list.Items[0]).Id == "nested", "History search must include later dialogue turns.");
             }
         }
         private static void Serve(Action<SpeechClient> action, string type, byte[] payload, Action<string, string> inspect, int status = 200)

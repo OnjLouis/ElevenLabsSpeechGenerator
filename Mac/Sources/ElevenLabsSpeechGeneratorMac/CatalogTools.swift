@@ -11,7 +11,7 @@ extension AppModel {
     func loadCatalogPage(_ move: CatalogPageMove) {
         let scope = catalogPageContext
         guard !busy, let kind = tool, let page = catalogPages.request(move, scope: scope) else { return }
-        let query = Self.escape(search), shared = sharedVoices
+        let searchText = search, query = Self.escape(search), shared = sharedVoices
         if kind == .voices { voiceAudition.stop() }
         run("Loading \(kind.rawValue)") {
             let path: String
@@ -24,10 +24,10 @@ extension AppModel {
             let key = kind == .history ? "history" : kind == .dictionaries ? "pronunciation_dictionaries" : "voices"
             let id = kind == .history ? "history_item_id" : kind == .dictionaries ? "id" : "voice_id"
             var items = Self.items(d, key, id: id)
-            if kind == .history { items = items.map { x in var i = x; i.name += " - " + String(x.string("text").prefix(100)).replacingOccurrences(of: "\n", with: " "); return i } }
+            if kind == .history { items = items.filter { HistoryRecord.matches($0.data, query: searchText) }.map { x in var i = x; i.name = HistoryRecord.label(x.data); return i } }
             self.catalog = items; self.selectedCatalog = []
             let more = d["has_more"] as? Bool == true
-            let following = !more ? "" : kind == .history ? d["last_history_item_id"] as? String ?? items.last?.id ?? "" : kind == .dictionaries ? d["next_cursor"] as? String ?? "" : shared ? String((Int(page) ?? 0) + 1) : d["next_page_token"] as? String ?? ""
+            let following = !more ? "" : kind == .history ? d["last_history_item_id"] as? String ?? Self.items(d, key, id: id).last?.id ?? "" : kind == .dictionaries ? d["next_cursor"] as? String ?? "" : shared ? String((Int(page) ?? 0) + 1) : d["next_page_token"] as? String ?? ""
             self.catalogPages.commit(move, scope: scope, page: page, following: following)
         }
     }
@@ -84,9 +84,9 @@ extension AppModel {
     }
     func historyDownload(play: Bool = false) {
         guard let x = catalogSelection else { return }; let folder = URL(fileURLWithPath: preferences.outputFolder)
-        var target = SpeechFiles.next(folder: folder, stem: x.name, ext: ".mp3")
+        var target = SpeechFiles.next(folder: folder, stem: x.name, ext: ".wav")
         if !play { let panel = NSSavePanel(); panel.nameFieldStringValue = target.lastPathComponent; guard panel.runModal() == .OK, let url = panel.url else { return }; target = url }
-        run("Downloading history audio") { let data = try await self.service().get("/v1/history/\(Self.escape(x.id))/audio"); try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true); try data.write(to: target, options: .atomic); if play { self.play(target) } }
+        run("Downloading history audio") { let data = try await self.service().historyAudio(x.id); try FileManager.default.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true); try data.write(to: target, options: .atomic); if play { self.play(target) } }
     }
     func applyDictionaries() {
         guard selectedCatalog.count <= 3 else { showResult("Pronunciation dictionaries", "Select up to three dictionaries."); return }

@@ -39,6 +39,27 @@ final class ApiTests: XCTestCase {
         FixtureProtocol.declaredLength = nil
     }
     override func tearDown() { session.invalidateAndCancel(); FixtureProtocol.reply = nil }
+    func testHistoryExportsPlayableWavWithoutRegeneration() async throws {
+        let pcm = Data(repeating: 0, count: 9600)
+        let wave = try SpeechService.audio(SpeechResult(data: pcm, requestId: "fixture", contentType: "audio/pcm"), format: "pcm_48000", channels: 1)
+        FixtureProtocol.reply = { request in
+            XCTAssertEqual(request.httpMethod, "POST"); XCTAssertEqual(request.url?.path, "/v1/history/download")
+            let body = try JSONSerialization.jsonObject(with: FixtureProtocol.body(request)) as! [String: Any]
+            XCTAssertEqual(body["output_format"] as? String, "wav")
+            XCTAssertEqual(body["history_item_ids"] as? [String], ["existing-recording"])
+            return (200, "audio/wav", wave)
+        }
+        let downloaded = try await api.historyAudio("existing-recording")
+        XCTAssertEqual(downloaded, wave)
+        XCTAssertEqual(String(decoding: downloaded.prefix(4), as: UTF8.self), "RIFF")
+        XCTAssertEqual(downloaded.count, pcm.count + 44)
+    }
+    func testHistoryRejectsRawPcmAndUnexpectedArchives() async throws {
+        for invalid in [Data(repeating: 0, count: 9600), Data("PK unexpected archive instead of a single WAV recording".utf8)] {
+            FixtureProtocol.reply = { _ in (200, "application/octet-stream", invalid) }
+            do { _ = try await api.historyAudio("existing-recording"); XCTFail("Unplayable history response accepted") } catch { }
+        }
+    }
     func testRenameUsesNameOnlyAndRequiresConfirmation() async throws {
         let voice = CatalogItem(id: "own", name: "Original", data: ["category": "cloned", "is_owner": true])
         FixtureProtocol.reply = { request in

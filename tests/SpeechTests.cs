@@ -53,6 +53,30 @@ namespace ElevenLabsSpeechGenerator
             }
         }
 
+        private static void TestPlaybackErrorOwnership()
+        {
+            using (var main = new MainForm(null))
+            using (var history = new System.Windows.Forms.Form { Text = "History fixture", ShowInTaskbar = false })
+            using (var dismiss = new System.Windows.Forms.Timer { Interval = 30 })
+            {
+                history.Show(main); System.Windows.Forms.Application.DoEvents();
+                bool explained = false, correctOwner = false, readable = false;
+                dismiss.Tick += delegate {
+                    foreach (System.Windows.Forms.Form window in System.Windows.Forms.Application.OpenForms)
+                        if (window is ApiKeyTestResultForm && window.Text == "Could not play") {
+                            explained = true; correctOwner = window.Owner == history;
+                            var text = Descendants(window).OfType<System.Windows.Forms.TextBox>().Single();
+                            readable = text.Focused && text.ReadOnly && text.Text == "Fixture playback failure";
+                            window.Close(); break;
+                        }
+                };
+                dismiss.Start();
+                typeof(MainForm).GetMethod("PlaybackFailed", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic).Invoke(main, new object[] { new InvalidDataException("Fixture playback failure") });
+                Check(explained && correctOwner && readable, "Playback errors must open as readable dialogs above the current tool, not behind History.");
+                history.Close();
+            }
+        }
+
         private static void TestNativePlayback()
         {
             var folder = Path.Combine(AppPaths.AppFolder, "Native playback test");
@@ -141,8 +165,8 @@ namespace ElevenLabsSpeechGenerator
                         var controls = Descendants(form).ToArray();
                         var tags = controls.OfType<System.Windows.Forms.ListBox>().Single();
                         tags.Focus();
-                        foreach (char letter in "chu") SendMessage(tags.Handle, 0x0102, new IntPtr(letter), IntPtr.Zero);
-                        Check(Convert.ToString(tags.SelectedItem) == "chuckles" && tags.Focused, "Typing chu must find chuckles without leaving the tag list.");
+                        TypeUnmodified(tags, "chu");
+                        Check(Convert.ToString(tags.SelectedItem) == "chuckles" && tags.Focused, "Typing chu must find chuckles without leaving the tag list. Selected: " + Convert.ToString(tags.SelectedItem) + "; focused: " + tags.Focused + "; modifiers: " + System.Windows.Forms.Control.ModifierKeys);
                         var keys = controls.Where(x => x.Text.Contains("&") && (x is System.Windows.Forms.Button || x is System.Windows.Forms.Label)).Select(x => char.ToLowerInvariant(x.Text[x.Text.IndexOf('&') + 1])).ToArray();
                         Check(keys.Distinct().Count() == keys.Length, "Tag picker mnemonics collide");
                         var custom = controls.OfType<System.Windows.Forms.TextBox>().First(x => x.AccessibleName == "Custom tag");
@@ -200,6 +224,7 @@ namespace ElevenLabsSpeechGenerator
             Check(typeof(AppSettings).GetField("AutoPreviewVoices") != null, "Voice library automatic preview must be persisted and opt-in.");
             Check(SpeechTags.Examples.Contains("long pause") && SpeechTags.Examples.Contains("British accent"), "The tag picker must include current documented examples.");
             TestVersionHistoryMenu();
+            TestPlaybackErrorOwnership();
             TestStartupArguments();
             TestCloneDialog();
             count += LongSpeechTests.Run();
@@ -490,10 +515,29 @@ namespace ElevenLabsSpeechGenerator
 
         [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern IntPtr SendMessage(IntPtr window, int message, IntPtr wParam, IntPtr lParam);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool GetKeyboardState(byte[] state);
+        [System.Runtime.InteropServices.DllImport("user32.dll")]
+        private static extern bool SetKeyboardState(byte[] state);
+
+        private static void TypeUnmodified(System.Windows.Forms.Control control, string text)
+        {
+            // WM_CHAR fixtures must not inherit modifiers held in another application.
+            // This changes only the test thread's logical state, not physical key input.
+            var saved = new byte[256];
+            if (!GetKeyboardState(saved)) throw new Exception("Could not save test keyboard state.");
+            var plain = (byte[])saved.Clone();
+            foreach (var key in new[] { System.Windows.Forms.Keys.ControlKey, System.Windows.Forms.Keys.Menu, System.Windows.Forms.Keys.LControlKey, System.Windows.Forms.Keys.RControlKey, System.Windows.Forms.Keys.LMenu, System.Windows.Forms.Keys.RMenu }) plain[(int)key] = 0;
+            try {
+                if (!SetKeyboardState(plain)) throw new Exception("Could not set test keyboard state.");
+                const int CharacterMessage = 0x0102;
+                foreach (char value in text) SendMessage(control.Handle, CharacterMessage, new IntPtr(value), IntPtr.Zero);
+            }
+            finally { if (!SetKeyboardState(saved)) throw new Exception("Could not restore test keyboard state."); }
+        }
 
         private static void TestVoiceListPrefixNavigation()
         {
-            const int CharacterMessage = 0x0102;
             const int KeyDownMessage = 0x0100;
             var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
             using (var form = new MainForm(null))
@@ -503,8 +547,8 @@ namespace ElevenLabsSpeechGenerator
                 host.Controls.Add(combo); host.Show(); combo.Items.Clear();
                 foreach (var name in new[] { "Amy", "Andre Louis", "Andrew", "Narrator" }) combo.Items.Add(new NamedItem { Name = name });
                 combo.SelectedIndex = 3; combo.Focus();
-                foreach (char letter in "andre l") SendMessage(combo.Handle, CharacterMessage, new IntPtr(letter), IntPtr.Zero);
-                Check(Convert.ToString(combo.SelectedItem) == "Andre Louis" && combo.Focused, "The main voice dropdown must accept a complete multi-letter name including spaces.");
+                TypeUnmodified(combo, "andre l");
+                Check(Convert.ToString(combo.SelectedItem) == "Andre Louis" && combo.Focused, "The main voice dropdown must accept a complete multi-letter name including spaces. Selected: " + Convert.ToString(combo.SelectedItem) + "; focused: " + combo.Focused);
             }
             using (var player = new Playback())
             using (var form = new CatalogForm("Voices", new SpeechClient(""), new AppSettings(), player, new SpeechProject()))
@@ -513,7 +557,7 @@ namespace ElevenLabsSpeechGenerator
                 var list = (System.Windows.Forms.ListBox)typeof(CatalogForm).GetField("list", flags).GetValue(form);
                 host.Controls.Add(list); host.Show(); list.Focus();
                 foreach (var name in new[] { "Sarah", "Stephen", "Steve", "Susan", "Technology" }) list.Items.Add(new NamedItem { Name = name });
-                Action<string> type = text => { foreach (char value in text) SendMessage(list.Handle, CharacterMessage, new IntPtr(value), IntPtr.Zero); };
+                Action<string> type = text => TypeUnmodified(list, text);
                 Action<System.Windows.Forms.Keys> key = value => SendMessage(list.Handle, KeyDownMessage, new IntPtr((int)value), IntPtr.Zero);
                 list.SelectedIndex = 4; type("s");
                 Check(list.SelectedIndex == 0, "First-letter navigation must select Sarah, actual index: " + list.SelectedIndex);

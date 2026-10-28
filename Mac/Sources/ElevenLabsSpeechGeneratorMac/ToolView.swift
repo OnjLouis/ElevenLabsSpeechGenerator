@@ -48,7 +48,7 @@ struct ToolView: View {
                 .onChange(of: model.selectedCatalog) { _, _ in if kind == .voices { model.catalogVoiceChanged() } }
                 .onKeyPress(.return) { if kind == .voices { model.previewVoice(); return .handled }; return .ignored }
             if let x = model.catalogSelection {
-                KeyboardTextView(text: .constant((x.data["description"] as? String ?? x.string("text"))), editable: false, accessibilityLabel: "Details", accessibilityHelp: "Details for the selected item.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 80)
+                KeyboardTextView(text: .constant(kind == .history ? HistoryRecord.details(x.data) : (x.data["description"] as? String ?? x.string("text"))), editable: false, accessibilityLabel: "Details", accessibilityHelp: "Details for the selected item.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 80)
             }
             HStack {
                 if kind == .voices {

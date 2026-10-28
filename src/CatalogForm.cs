@@ -115,8 +115,8 @@ namespace ElevenLabsSpeechGenerator
                 var d = JsonData.Object(await Task.Run(() => client.Get(path, token))); var source = JsonData.Items(d, kind == "History" ? "history" : kind == "Dictionaries" ? "pronunciation_dictionaries" : "voices").ToList(); items.Clear();
                 foreach (var x in source)
                 {
-                    string name = JsonData.String(x, "name"); if (kind == "History") name = JsonData.String(x, "voice_name") + " - " + JsonData.String(x, "text").Replace("\n", " ");
-                    if (kind != "Voices" && query.Length > 0 && name.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0) continue;
+                    string name = kind == "History" ? HistoryRecord.Label(x) : JsonData.String(x, "name");
+                    if (query.Length > 0 && (kind == "History" ? !HistoryRecord.Matches(x, query) : kind != "Voices" && name.IndexOf(query, StringComparison.CurrentCultureIgnoreCase) < 0)) continue;
                     items.Add(new NamedItem { Id = JsonData.String(x, kind == "History" ? "history_item_id" : kind == "Dictionaries" ? "id" : "voice_id"), Name = name, Data = x });
                 }
                 string following = !JsonData.Bool(d, "has_more") ? "" : kind == "History" ? JsonData.String(d, "last_history_item_id") : kind == "Dictionaries" ? JsonData.String(d, "next_cursor") : isShared ? (page.Length == 0 ? "1" : (int.Parse(page) + 1).ToString()) : JsonData.String(d, "next_page_token");
@@ -131,7 +131,7 @@ namespace ElevenLabsSpeechGenerator
         }
         private string Describe(NamedItem item)
         {
-            if (kind == "History") return SpeechProject.WindowsLines(JsonData.String(item.Data, "text")) + "\r\nModel: " + JsonData.String(item.Data, "model_id");
+            if (kind == "History") return HistoryRecord.Details(item.Data);
             if (kind == "Dictionaries") return JsonData.String(item.Data, "description") + "\r\nVersion: " + JsonData.String(item.Data, "latest_version_id");
             return SpeechProject.WindowsLines(JsonData.String(item.Data, "description")) + "\r\nCategory: " + JsonData.String(item.Data, "category");
         }
@@ -173,9 +173,9 @@ namespace ElevenLabsSpeechGenerator
         private async Task DownloadHistory(bool play = false)
         {
             var x = list.SelectedItem as NamedItem; if (x == null) return;
-            var path = FileNames.Next(settings.DefaultOutputFolder, x.Name.Length > 0 ? x.Name : "History", ".mp3"); Directory.CreateDirectory(settings.DefaultOutputFolder);
-            if (!play) using (var d = new SaveFileDialog { Filter = "MP3|*.mp3", FileName = Path.GetFileName(path), InitialDirectory = settings.DefaultOutputFolder }) { if (d.ShowDialog(this) != DialogResult.OK) return; path = d.FileName; if (File.Exists(path)) { Ui.Result(this, "Choose another filename", "Choose a new filename to keep the existing file."); return; } }
-            await Work(async token => { await Task.Run(() => client.Download("/v1/history/" + Uri.EscapeDataString(x.Id) + "/audio", path, token)); if (play) playback.Play(path, settings.PlaybackDevice); });
+            var path = FileNames.Next(settings.DefaultOutputFolder, x.Name.Length > 0 ? x.Name : "History", ".wav"); Directory.CreateDirectory(settings.DefaultOutputFolder);
+            if (!play) using (var d = new SaveFileDialog { Filter = "WAV audio|*.wav", FileName = Path.GetFileName(path), InitialDirectory = settings.DefaultOutputFolder }) { if (d.ShowDialog(this) != DialogResult.OK) return; path = d.FileName; if (File.Exists(path)) { Ui.Result(this, "Choose another filename", "Choose a new filename to keep the existing file."); return; } }
+            await Work(async token => { await Task.Run(() => client.DownloadHistory(x.Id, path, token)); if (play) playback.Play(path, settings.PlaybackDevice); });
         }
         private void ApplyDictionaries()
         {

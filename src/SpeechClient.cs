@@ -32,6 +32,10 @@ namespace ElevenLabsSpeechGenerator
         public string Upload(string path, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token) { return Send("POST", path, null, fields, files, null, 0, token).Json; }
         public string Upload(string path, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token, Action<string> progress) { return Send("POST", path, null, fields, files, null, 0, token, progress).Json; }
         public ApiResult Download(string path, string output, CancellationToken token) { return Send("GET", path, null, null, null, output, 0, token); }
+        public ApiResult DownloadHistory(string id, string output, CancellationToken token)
+        {
+            return Send("POST", "/v1/history/download", new { history_item_ids = new[] { id }, output_format = "wav" }, null, null, output, 0, token);
+        }
         public void Delete(string path, CancellationToken token) { Send("DELETE", path, null, null, null, null, 0, token); }
         internal static string PreviewExtension(Dictionary<string, object> preview)
         {
@@ -115,6 +119,12 @@ namespace ElevenLabsSpeechGenerator
                                 file.Position = 0; var header = new byte[12]; int count = file.Read(header, 0, header.Length);
                                 if (count < 12) throw new InvalidDataException("The isolation service returned incomplete audio.");
                                 var ext = IsolationExtension(header); if (Path.GetExtension(output) != ext) output = FileNames.Next(Path.GetDirectoryName(output), Path.GetFileNameWithoutExtension(output), ext);
+                            }
+                            if (path == "/v1/history/download")
+                            {
+                                file.Position = 0; var header = new byte[12]; int count = file.Read(header, 0, header.Length);
+                                if (file.Length < 44 || count != 12 || Encoding.ASCII.GetString(header, 0, 4) != "RIFF" || Encoding.ASCII.GetString(header, 8, 4) != "WAVE")
+                                    throw new InvalidDataException("ElevenLabs did not return a playable WAV recording.");
                             }
                             file.Flush(true);
                         }

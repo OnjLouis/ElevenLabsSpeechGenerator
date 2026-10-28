@@ -70,6 +70,14 @@ final class SpeechService {
     func get(_ path: String) async throws -> Data { try await send("GET", path: path).data }
     func post(_ path: String, body: [String: Any]) async throws -> Data { try await send("POST", path: path, body: JSONSerialization.data(withJSONObject: body)).data }
     func delete(_ path: String) async throws { _ = try await send("DELETE", path: path) }
+    func historyAudio(_ id: String) async throws -> Data {
+        let result = try await send("POST", path: "/v1/history/download", body: JSONSerialization.data(withJSONObject: ["history_item_ids": [id], "output_format": "wav"]))
+        guard result.data.count >= 44, String(decoding: result.data.prefix(4), as: UTF8.self) == "RIFF",
+              String(decoding: result.data.dropFirst(8).prefix(4), as: UTF8.self) == "WAVE" else {
+            throw SpeechError.response("ElevenLabs did not return a playable WAV recording.")
+        }
+        return result.data
+    }
     func generate(_ p: SpeechProject, model: CatalogItem?, context: [String: Any] = [:]) async throws -> SpeechResult {
         let suffix = "?output_format=\(p.outputFormat)"
         if p.mode == .voiceIsolation { return try await upload("/v1/audio-isolation", fields: ["file_format": "other"], files: [("audio", URL(fileURLWithPath: p.inputFile))]) }
@@ -112,7 +120,7 @@ final class SpeechService {
     private func send(_ method: String, path: String, body: Data? = nil, upload: URL? = nil, contentType: String = "application/json", progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
         guard !key.isEmpty, !key.contains("\r"), !key.contains("\n") else { throw SpeechError.validation("Enter a valid API key in Settings first.") }
         var r = URLRequest(url: URL(string: path, relativeTo: origin)!.absoluteURL); r.httpMethod = method; r.timeoutInterval = 600
-        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.1.1", forHTTPHeaderField: "User-Agent")
+        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.2.2", forHTTPHeaderField: "User-Agent")
         if body != nil || upload != nil { r.setValue(contentType, forHTTPHeaderField: "Content-Type") }; r.httpBody = body
         let result = try await BoundedResponse(limit: 256 * 1024 * 1024, uploadProgress: progress).receive(r, upload: upload, configuration: configuration)
         try Task.checkCancellation()
