@@ -522,7 +522,15 @@ namespace ElevenLabsSpeechGenerator
 
         private static void TypeUnmodified(System.Windows.Forms.Control control, string text)
         {
-            // WM_CHAR fixtures must not inherit modifiers held in another application.
+            WithoutTestModifiers(() => {
+                const int CharacterMessage = 0x0102;
+                foreach (char value in text) SendMessage(control.Handle, CharacterMessage, new IntPtr(value), IntPtr.Zero);
+            });
+        }
+
+        private static void WithoutTestModifiers(Action action)
+        {
+            // Synthetic key messages must not inherit modifiers held in another application.
             // This changes only the test thread's logical state, not physical key input.
             var saved = new byte[256];
             if (!GetKeyboardState(saved)) throw new Exception("Could not save test keyboard state.");
@@ -530,8 +538,7 @@ namespace ElevenLabsSpeechGenerator
             foreach (var key in new[] { System.Windows.Forms.Keys.ControlKey, System.Windows.Forms.Keys.Menu, System.Windows.Forms.Keys.LControlKey, System.Windows.Forms.Keys.RControlKey, System.Windows.Forms.Keys.LMenu, System.Windows.Forms.Keys.RMenu }) plain[(int)key] = 0;
             try {
                 if (!SetKeyboardState(plain)) throw new Exception("Could not set test keyboard state.");
-                const int CharacterMessage = 0x0102;
-                foreach (char value in text) SendMessage(control.Handle, CharacterMessage, new IntPtr(value), IntPtr.Zero);
+                action();
             }
             finally { if (!SetKeyboardState(saved)) throw new Exception("Could not restore test keyboard state."); }
         }
@@ -558,7 +565,7 @@ namespace ElevenLabsSpeechGenerator
                 host.Controls.Add(list); host.Show(); list.Focus();
                 foreach (var name in new[] { "Sarah", "Stephen", "Steve", "Susan", "Technology" }) list.Items.Add(new NamedItem { Name = name });
                 Action<string> type = text => TypeUnmodified(list, text);
-                Action<System.Windows.Forms.Keys> key = value => SendMessage(list.Handle, KeyDownMessage, new IntPtr((int)value), IntPtr.Zero);
+                Action<System.Windows.Forms.Keys> key = value => WithoutTestModifiers(() => SendMessage(list.Handle, KeyDownMessage, new IntPtr((int)value), IntPtr.Zero));
                 list.SelectedIndex = 4; type("s");
                 Check(list.SelectedIndex == 0, "First-letter navigation must select Sarah, actual index: " + list.SelectedIndex);
                 type("t");

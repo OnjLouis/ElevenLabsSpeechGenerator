@@ -24,6 +24,12 @@ namespace ElevenLabsSpeechGenerator
         private readonly VoiceAudition audition;
         private readonly CheckBox autoPreview = new CheckBox { Text = "&Automatically preview selected voices", AutoSize = true, AccessibleName = "Automatically preview selected voices" };
         private Button renameVoice;
+        private ShortcutButton copyVoiceId;
+        private readonly AccessibleStatusLabel copyStatus = new AccessibleStatusLabel { AutoSize = true };
+        private const Keys CopyVoiceIdShortcut = Keys.Control | Keys.Shift | Keys.C;
+#if PRIVATE_TEST
+        internal Action<string> TestCopy = Clipboard.SetText;
+#endif
         private bool replacingItems;
         private readonly CatalogPagination pages = new CatalogPagination();
         private readonly Button previousPage;
@@ -52,6 +58,7 @@ namespace ElevenLabsSpeechGenerator
             p.Controls.Add(row, 0, 0); p.Controls.Add(list, 0, 1); p.Controls.Add(description, 0, 2);
             list.SelectedIndexChanged += delegate {
                 var x = list.SelectedItem as NamedItem; description.Text = x == null ? "" : Describe(x);
+                if (copyVoiceId != null) { copyStatus.Text = ""; copyVoiceId.Enabled = SelectedVoiceId != null; }
                 if (renameVoice != null) renameVoice.Enabled = !busy && !shared.Checked && VoiceNames.CanRename(x);
                 if (kind == "Voices" && !replacingItems) audition.Select(x, autoPreview.Checked);
             };
@@ -72,7 +79,18 @@ namespace ElevenLabsSpeechGenerator
             }
             else if (kind == "History") { actions.Controls.Add(Ui.Button("&Download", async () => await DownloadHistory())); actions.Controls.Add(Ui.Button("&Play", async () => await DownloadHistory(true))); }
             else { actions.Controls.Add(Ui.Button("&Use selected", ApplyDictionaries)); actions.Controls.Add(Ui.Button("&Create...", CreateDictionary)); actions.Controls.Add(Ui.Button("&Import PLS...", async () => await ImportDictionary())); actions.Controls.Add(Ui.Button("&Export PLS...", async () => await ExportDictionary())); actions.Controls.Add(Ui.Button("Add &rule...", async () => await AddRule())); }
-            p.Controls.Add(actions, 0, 3); Controls.Add(p); Ui.CloseButton(this);
+            if (kind == "Voices")
+            {
+                copyVoiceId = new ShortcutButton { Text = "Copy voice &ID", ShortcutText = "Ctrl+Shift+C", AutoSize = true, MinimumSize = new Size(90, 28), Enabled = false };
+                copyVoiceId.Click += delegate { CopyVoiceId(); };
+                var detailsActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+                detailsActions.Controls.Add(copyVoiceId);
+                detailsActions.Controls.Add(copyStatus);
+                p.RowCount++;
+                p.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+                p.Controls.Add(detailsActions, 0, 3);
+            }
+            p.Controls.Add(actions, 0, kind == "Voices" ? 4 : 3); Controls.Add(p); Ui.CloseButton(this);
             Shown += async delegate { await LoadItems(false); };
             UpdateRenameAvailability();
             FormClosing += delegate(object s, FormClosingEventArgs e) { if (busy) { cancellation.Cancel(); e.Cancel = true; } };
@@ -82,6 +100,38 @@ namespace ElevenLabsSpeechGenerator
         {
             if (kind == "Voices" && keyData == Keys.Enter && list.Focused) { audition.Toggle(list.SelectedItem as NamedItem); return true; }
             return base.ProcessDialogKey(keyData);
+        }
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (kind == "Voices" && keyData == CopyVoiceIdShortcut) { CopyVoiceId(); return true; }
+            return base.ProcessCmdKey(ref msg, keyData);
+        }
+        private string SelectedVoiceId
+        {
+            get
+            {
+                var item = list.SelectedItem as NamedItem;
+                return busy || item == null || string.IsNullOrWhiteSpace(item.Id) ? null : item.Id;
+            }
+        }
+        private void CopyVoiceId()
+        {
+            var id = SelectedVoiceId;
+            if (id == null) return;
+            try
+            {
+#if PRIVATE_TEST
+                TestCopy(id);
+#else
+                Clipboard.SetText(id);
+#endif
+                copyStatus.Text = "Voice ID copied.";
+                copyStatus.NotifyNameChanged();
+            }
+            catch (System.Runtime.InteropServices.ExternalException)
+            {
+                Ui.Result(this, "Could not copy voice ID", "The clipboard is busy. Try again, or copy the ID from Details.");
+            }
         }
         private async Task Work(Func<CancellationToken, Task> action)
         {
@@ -95,6 +145,7 @@ namespace ElevenLabsSpeechGenerator
             if (IsDisposed) return;
             previousPage.Enabled = !busy && pages.CanPrevious(PageContext);
             nextPage.Enabled = !busy && pages.CanNext(PageContext);
+            if (copyVoiceId != null) copyVoiceId.Enabled = SelectedVoiceId != null;
             if (renameVoice != null && !IsDisposed) renameVoice.Enabled = !busy && !shared.Checked && VoiceNames.CanRename(list.SelectedItem as NamedItem);
         }
         private string PageContext { get { return kind + "\n" + shared.Checked + "\n" + search.Text; } }
@@ -133,7 +184,8 @@ namespace ElevenLabsSpeechGenerator
         {
             if (kind == "History") return HistoryRecord.Details(item.Data);
             if (kind == "Dictionaries") return JsonData.String(item.Data, "description") + "\r\nVersion: " + JsonData.String(item.Data, "latest_version_id");
-            return SpeechProject.WindowsLines(JsonData.String(item.Data, "description")) + "\r\nCategory: " + JsonData.String(item.Data, "category");
+            return "Voice ID: " + (string.IsNullOrWhiteSpace(item.Id) ? "Unavailable" : item.Id) + "\r\n" +
+                SpeechProject.WindowsLines(JsonData.String(item.Data, "description")) + "\r\nCategory: " + JsonData.String(item.Data, "category");
         }
         private async void UseVoice()
         {

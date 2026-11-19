@@ -3,6 +3,10 @@ import AppKit
 @MainActor
 enum VersionHistory {
     static let text = """
+    1.2.3
+
+    Copy Voice ID in Voice Library copies the selected voice ID with Command+Shift+C. The ID is also listed in Details.
+
     1.2.2
 
     Generation History now displays voice names and full transcripts for current speech and dialogue recordings. Search includes the full transcript on the current page. History playback and downloads retrieve playable WAV files, including recordings originally generated as raw PCM.

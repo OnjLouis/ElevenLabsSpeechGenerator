@@ -35,6 +35,7 @@ namespace ElevenLabsSpeechGenerator
             { "Voice library/Items", "Choose a voice to preview or use. Enter or Alt+P starts or stops its preview. Multi-letter typing searches names, for example ST for Stephen. Automatically preview selected voices auditions each selection. Rename is available for voices your account owns; Delete requires confirmation." },
             { "Automatically preview selected voices", "Audition each voice as you select it. Rapid navigation cancels earlier previews. This preference is saved; clear it to stop automatic playback. Voices without a preview remain silent." },
             { "Preview / Stop", "Start or stop the selected voice's existing preview, without generating audio or spending generation credits. Enter does the same when the voice list is focused." },
+            { "Copy voice ID", "Ctrl+Shift+C copies only the selected voice ID, without changing the selected voice or adding a shared voice to your account. You can also read and select the ID in Details." },
             { "Rename voice", "Change the selected voice's account name without changing its ID, samples or settings. Only voices owned by your account can be renamed. Voices Write permission is required." },
             { "Rename voice/Voice name", "Enter the new account name. Saving changes the name in ElevenLabs and this app; cancelling leaves it unchanged." },
             { "Pronunciation dictionaries/Items", "Choose up to three pronunciation dictionaries to apply to speech, or select one to export or add a rule." },

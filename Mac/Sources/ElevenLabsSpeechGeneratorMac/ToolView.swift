@@ -48,7 +48,20 @@ struct ToolView: View {
                 .onChange(of: model.selectedCatalog) { _, _ in if kind == .voices { model.catalogVoiceChanged() } }
                 .onKeyPress(.return) { if kind == .voices { model.previewVoice(); return .handled }; return .ignored }
             if let x = model.catalogSelection {
-                KeyboardTextView(text: .constant(kind == .history ? HistoryRecord.details(x.data) : (x.data["description"] as? String ?? x.string("text"))), editable: false, accessibilityLabel: "Details", accessibilityHelp: "Details for the selected item.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 80)
+                KeyboardTextView(text: .constant(kind == .history ? HistoryRecord.details(x.data) : kind == .voices ? x.voiceDetails : (x.data["description"] as? String ?? x.string("text"))), editable: false, accessibilityLabel: "Details", accessibilityHelp: kind == .voices ? "Voice ID and description for the selected voice." : "Details for the selected item.", onTab: { NSApp.keyWindow?.selectNextKeyView(nil) }, onBackTab: { NSApp.keyWindow?.selectPreviousKeyView(nil) }, onReady: { _ in }).frame(height: 80)
+            }
+            if kind == .voices {
+                Button("Copy Voice ID") {
+                    guard !model.busy, let voice = model.catalogSelection, voice.hasVoiceID else { return }
+                    guard voice.copyVoiceID(to: .general) else { model.showResult("Could not copy voice ID", "Try again, or copy the ID from Details."); return }
+                    if let window = NSApp.keyWindow {
+                        NSAccessibility.post(element: window, notification: .announcementRequested,
+                            userInfo: [.announcement: "Voice ID copied.", .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                    }
+                }
+                .disabled(model.busy || model.catalogSelection?.hasVoiceID != true)
+                .keyboardShortcut("c", modifiers: [.command, .shift])
+                .accessibilityHint("Command+Shift+C. Copy only the selected voice ID without changing your selection or adding the voice to your account.")
             }
             HStack {
                 if kind == .voices {

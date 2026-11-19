@@ -2,6 +2,22 @@ import AppKit
 import CoreAudio
 import Foundation
 
+extension CatalogItem {
+    var hasVoiceID: Bool { !id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    var voiceDetails: String {
+        let heading = "Voice ID: " + (hasVoiceID ? id : "Unavailable")
+        let description = data["description"] as? String ?? string("text")
+        return description.isEmpty ? heading : heading + "\n" + description
+    }
+
+    @MainActor func copyVoiceID(to pasteboard: NSPasteboard) -> Bool {
+        guard hasVoiceID else { return false }
+        pasteboard.clearContents()
+        return pasteboard.setString(id, forType: .string)
+    }
+}
+
 extension AppModel {
     func openTool(_ kind: ToolKind) { guard !busy, kind != .dialogue || project.mode == .dialogue else { return }; if kind == .clone { cloneCreated = false; cloneStatus = "Ready. Add samples and confirm consent before creating a voice." }; tool = kind; catalog = []; selectedCatalog = []; catalogPages = CatalogPagination(); search = ""; if [.voices, .history, .dictionaries].contains(kind) { refreshTool() } }
     var catalogPageContext: String { "\(tool?.rawValue ?? "")\n\(sharedVoices)\n\(search)" }

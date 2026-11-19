@@ -1,8 +1,21 @@
+import AppKit
 import Foundation
 import XCTest
 @testable import ElevenLabsSpeechGeneratorMac
 
 final class VoiceAuditionTests: XCTestCase {
+    @MainActor func testCopyVoiceIDAndDetails() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        defer { pasteboard.releaseGlobally() }
+        let selected = CatalogItem(id: "AbC0123", name: "Voice", data: ["description": "A voice description"])
+        XCTAssertEqual(selected.voiceDetails, "Voice ID: AbC0123\nA voice description")
+        XCTAssertTrue(selected.copyVoiceID(to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .string), "AbC0123")
+        let missing = voice(" ")
+        XCTAssertEqual(missing.voiceDetails, "Voice ID: Unavailable")
+        XCTAssertFalse(missing.copyVoiceID(to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .string), "AbC0123")
+    }
     private func voice(_ id: String) -> CatalogItem { CatalogItem(id: id, name: id, data: ["preview_url": "https://example.invalid/\(id)", "category": "cloned", "is_owner": true]) }
     @MainActor func testLatestSelectionStopAndCleanup() async throws {
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
