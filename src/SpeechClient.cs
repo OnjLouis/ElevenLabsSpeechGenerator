@@ -14,7 +14,7 @@ namespace ElevenLabsSpeechGenerator
         public string ResponseBody { get; private set; }
         public ElevenLabsApiException(string message, HttpStatusCode? status, string body, Exception inner) : base(message, inner) { StatusCode = status; ResponseBody = body; }
     }
-    internal sealed class ApiResult { public string Json; public string File; public string RequestId; }
+    internal sealed class ApiResult { public string Json; public string File; public string RequestId; public decimal? ReportedCredits; }
     internal sealed class UploadFile
     {
         public string Field; public string Path;
@@ -68,17 +68,17 @@ namespace ElevenLabsSpeechGenerator
                 }
                 else
                 {
-                    path = "/v1/speech-to-speech/" + Uri.EscapeDataString(p.VoiceId) + suffix; files.Add(new UploadFile("audio", p.InputFile));
+                    path = "/v1/voice-changer/" + Uri.EscapeDataString(p.VoiceId) + suffix; files.Add(new UploadFile("audio", p.InputFile));
                     fields["voice_settings"] = JsonData.Encode(p.VoiceSettings(model)); fields["remove_background_noise"] = p.RemoveNoise ? "true" : "false";
                 }
-                return Send("POST", path, null, fields, files, p.Mode == SpeechMode.Transcription ? null : output, channels, token);
+                return Send("POST", path, null, fields.Concat(p.ScribeV3Fields()), files, p.Mode == SpeechMode.Transcription ? null : output, channels, token);
             }
             path = p.Mode == SpeechMode.Dialogue ? "/v1/text-to-dialogue" : p.Mode == SpeechMode.VoiceDesign ? "/v1/text-to-voice/design" : p.Mode == SpeechMode.VoiceRemix ? "/v1/text-to-voice/" + Uri.EscapeDataString(p.VoiceId) + "/remix" : "/v1/text-to-speech/" + Uri.EscapeDataString(p.VoiceId);
             var body = p.JsonBody(model);
             if (p.Mode == SpeechMode.TextToSpeech && context != null) foreach (var item in context) body.Add(item.Key, item.Value);
             return Send("POST", path + suffix, body, null, null, p.Mode == SpeechMode.VoiceDesign || p.Mode == SpeechMode.VoiceRemix ? null : output, channels, token);
         }
-        private ApiResult Send(string method, string path, object body, Dictionary<string, string> fields, List<UploadFile> files, string output, int channels, CancellationToken token, Action<string> progress = null)
+        private ApiResult Send(string method, string path, object body, IEnumerable<KeyValuePair<string, string>> fields, List<UploadFile> files, string output, int channels, CancellationToken token, Action<string> progress = null)
         {
             if (key.Length == 0) throw new InvalidOperationException("Enter an API key in Preferences first.");
             token.ThrowIfCancellationRequested(); var request = ApiTransport.Create(origin + path, method, key, Timeout); string temp = null;
@@ -95,7 +95,8 @@ namespace ElevenLabsSpeechGenerator
                     if (progress != null) progress(CurlTransport.UseForCurrentSystem ? "Sending samples and waiting for ElevenLabs to create the voice..." : "Upload sent. Waiting for ElevenLabs to create the voice...");
                     using (var response = request.GetResponse()) using (var stream = response.GetResponseStream())
                     {
-                        var result = new ApiResult { RequestId = response.Headers["request-id"] };
+                        var result = new ApiResult { RequestId = response.Headers["request-id"],
+                            ReportedCredits = RunCreditUsage.Parse(response.Headers["character-cost"]) };
                         if (output == null)
                         {
                             using (var buffer = new MemoryStream()) { Copy(stream, buffer, 16L * 1024 * 1024, token); result.Json = Encoding.UTF8.GetString(buffer.ToArray()); }
@@ -144,7 +145,7 @@ namespace ElevenLabsSpeechGenerator
                 finally { if (temp != null && File.Exists(temp)) File.Delete(temp); }
             }
         }
-        private static void WriteMultipart(IApiRequest request, Dictionary<string, string> fields, List<UploadFile> files, CancellationToken token, Action<string> progress)
+        private static void WriteMultipart(IApiRequest request, IEnumerable<KeyValuePair<string, string>> fields, List<UploadFile> files, CancellationToken token, Action<string> progress)
         {
             var boundary = "Speech" + Guid.NewGuid().ToString("N"); request.ContentType = "multipart/form-data; boundary=" + boundary;
             var parts = new List<byte[]>(); long length = 0;

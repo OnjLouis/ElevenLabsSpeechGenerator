@@ -43,6 +43,10 @@ namespace ElevenLabsSpeechGenerator
         public double Speed { get; set; }
         public bool SpeakerBoost { get; set; }
         public string Language { get; set; }
+        public const string ScribeV3 = "scribe_v3";
+        public string TranscriptionNumberFormat { get; set; }
+        public string SecondaryLanguages { get; set; }
+        internal bool UsesScribeV3 { get { return Mode == SpeechMode.Transcription && ModelId == ScribeV3; } }
         public bool Diarize { get; set; }
         public bool AudioEvents { get; set; }
         public bool RemoveNoise { get; set; }
@@ -51,7 +55,7 @@ namespace ElevenLabsSpeechGenerator
 
         public SpeechProject()
         {
-            SchemaVersion = 1; Text = Filename = InputFile = VoiceId = Language = "";
+            SchemaVersion = 1; Text = Filename = InputFile = VoiceId = Language = TranscriptionNumberFormat = SecondaryLanguages = "";
             ModelId = "eleven_v4"; OutputFormat = "mp3_44100_128"; Variations = 1;
             Stability = .5; Similarity = .75; Style = 0; Speed = 1; SpeakerBoost = true;
             AudioEvents = true;
@@ -62,7 +66,7 @@ namespace ElevenLabsSpeechGenerator
             var project = new SpeechProject { Mode = mode };
             switch (mode)
             {
-                case SpeechMode.Transcription: project.ModelId = "scribe_v2"; break;
+                case SpeechMode.Transcription: project.ModelId = ScribeV3; break;
                 case SpeechMode.VoiceChanger: project.ModelId = "eleven_multilingual_sts_v2"; break;
                 case SpeechMode.VoiceDesign: project.ModelId = "eleven_ttv_v3"; break;
                 case SpeechMode.VoiceIsolation: project.ModelId = "audio_isolation"; break;
@@ -72,9 +76,26 @@ namespace ElevenLabsSpeechGenerator
             return project;
         }
 
+        internal IEnumerable<KeyValuePair<string, string>> ScribeV3Fields()
+        {
+            if (!UsesScribeV3) yield break;
+            if (!string.IsNullOrEmpty(TranscriptionNumberFormat))
+            {
+                if (TranscriptionNumberFormat != "digits" && TranscriptionNumberFormat != "words")
+                    throw new InvalidDataException("Choose automatic, digits or words for number format.");
+                yield return new KeyValuePair<string, string>("numbers_format", TranscriptionNumberFormat);
+            }
+            if (string.IsNullOrWhiteSpace(SecondaryLanguages)) yield break;
+            var languages = SecondaryLanguages.Split(',').Select(x => x.Trim().ToLowerInvariant()).Distinct().ToArray();
+            if (string.IsNullOrWhiteSpace(Language) || languages.Any(x => (x.Length != 2 && x.Length != 3) || x.Any(c => c < 'a' || c > 'z')))
+                throw new InvalidDataException("Enter a main language code and comma-separated secondary language codes, such as es, fr.");
+            foreach (var code in languages) yield return new KeyValuePair<string, string>("secondary_language_codes", code);
+        }
+
         public void Validate(int textLimit)
         {
             ValidateStructure();
+            if (UsesScribeV3) ScribeV3Fields().ToArray();
             if (SchemaVersion != 1) throw new InvalidDataException("This project uses an unsupported format version.");
             if (!Enum.IsDefined(typeof(SpeechMode), Mode)) throw new InvalidDataException("Unknown generation mode.");
             if (Variations < 1 || Variations > 10) throw new InvalidDataException("Choose between 1 and 10 variations.");

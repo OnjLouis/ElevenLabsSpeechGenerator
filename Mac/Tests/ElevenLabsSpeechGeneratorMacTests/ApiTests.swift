@@ -6,6 +6,7 @@ private final class FixtureProtocol: URLProtocol {
     static var reply: ((URLRequest) throws -> (Int, String, Data))?
     static var calls = 0
     static var declaredLength: Int?
+    static var reportedCreditCost: String?
     static func body(_ request: URLRequest) throws -> Data {
         if let data = request.httpBody { return data }
         guard let stream = request.httpBodyStream else { throw SpeechError.response("Fixture request body missing.") }
@@ -20,6 +21,7 @@ private final class FixtureProtocol: URLProtocol {
             let (code, type, data) = try Self.reply!(request)
             var headers = ["Content-Type": type, "request-id": "fixture"]
             if let length = Self.declaredLength { headers["Content-Length"] = String(length) }
+            if let cost = Self.reportedCreditCost { headers["Character-Cost"] = cost }
             let r = HTTPURLResponse(url: request.url!, statusCode: code, httpVersion: "HTTP/1.1", headerFields: headers)!
             client?.urlProtocol(self, didReceive: r, cacheStoragePolicy: .notAllowed)
             client?.urlProtocol(self, didLoad: data); client?.urlProtocolDidFinishLoading(self)
@@ -29,6 +31,49 @@ private final class FixtureProtocol: URLProtocol {
 }
 
 final class ApiTests: XCTestCase {
+    func testRunCreditUsage() {
+        let five = RunCreditUsage.parse("5")
+        let seven = RunCreditUsage.parse("7")
+        XCTAssertEqual(five, 5)
+        XCTAssertEqual(seven, 7)
+        XCTAssertEqual(RunCreditUsage.parse("1.25"), Decimal(string: "1.25", locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertEqual(RunCreditUsage.parse("0"), 0)
+        for value in [nil, "", "-2", "1,2", "4.2x", "4e2", "1.", "2\r\n1"] as [String?] {
+            XCTAssertNil(RunCreditUsage.parse(value))
+        }
+        XCTAssertEqual(RunCreditUsage.completionLine([five, seven]), "Credits used this run: 12.")
+        XCTAssertNil(RunCreditUsage.completionLine([five, nil]))
+        XCTAssertNil(RunCreditUsage.completionLine([]))
+    }
+
+    func testBalancePercentageAndOverage() throws {
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":37,"character_limit":100,"max_credit_limit_extension":0}"#.utf8)).display()
+            XCTAssertTrue(text.contains("(63%)") && !text.contains("Overage billing:"))
+        }
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":37,"character_limit":100,"max_credit_limit_extension":25,"can_extend_character_limit":false,"current_overage":{"amount":"0.00","currency":"usd"}}"#.utf8)).display()
+            XCTAssertTrue(text.contains("Next reset: unavailable.\nOverage billing: on.") && !text.contains("Current overage charge"))
+        }
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":0,"character_limit":0,"can_extend_character_limit":true}"#.utf8)).display()
+            XCTAssertTrue(!text.contains("%") && !text.contains("Overage billing:"))
+        }
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":1,"character_limit":100000,"max_credit_limit_extension":"unlimited","current_overage":{"amount":"39.11","currency":"usd"}}"#.utf8)).display()
+            XCTAssertTrue(text.contains("(99%)") && text.contains("Overage billing: on.") && text.contains("Current overage charge: USD "))
+        }
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":101,"character_limit":100,"max_credit_limit_extension":"invalid","current_overage":{"amount":"39.11"}}"#.utf8)).display()
+            XCTAssertTrue(text.contains("(0%)") && text.contains("exceeded by") && !text.contains("Overage billing:") && !text.contains("Current overage charge"))
+        }
+        do {
+            let text = try SubscriptionBalance.decode(Data(#"{"character_count":20,"character_limit":100,"max_credit_limit_extension":0,"current_overage":{"amount":"1.25","currency":"usd"}}"#.utf8)).display()
+            XCTAssertFalse(text.contains("Overage billing:"))
+            XCTAssertTrue(text.contains("Next reset: unavailable.\nCurrent overage charge: USD "))
+        }
+    }
+
     private var session: URLSession!
     private var api: SpeechService!
     override func setUp() {
@@ -37,8 +82,21 @@ final class ApiTests: XCTestCase {
         api = SpeechService(key: "fixture-not-a-key", session: session)
         FixtureProtocol.calls = 0
         FixtureProtocol.declaredLength = nil
+        FixtureProtocol.reportedCreditCost = nil
     }
     override func tearDown() { session.invalidateAndCancel(); FixtureProtocol.reply = nil }
+    func testTextToSpeechKeepsReportedCost() async throws {
+        FixtureProtocol.reportedCreditCost = "21"
+        FixtureProtocol.reply = { request in
+            XCTAssertEqual(request.url?.path, "/v1/text-to-speech/test-voice")
+            return (200, "audio/mpeg", Data("ID3fixture".utf8))
+        }
+        var project = SpeechProject()
+        project.text = "This is a short test."
+        project.voiceId = "test-voice"
+        let result = try await api.generate(project, model: nil)
+        XCTAssertEqual(result.reportedCredits, 21)
+    }
     func testHistoryExportsPlayableWavWithoutRegeneration() async throws {
         let pcm = Data(repeating: 0, count: 9600)
         let wave = try SpeechService.audio(SpeechResult(data: pcm, requestId: "fixture", contentType: "audio/pcm"), format: "pcm_48000", channels: 1)
@@ -119,7 +177,7 @@ final class ApiTests: XCTestCase {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent("SpeechFixture-\(UUID()).wav")
         try Data(repeating: 0, count: 80).write(to: file); defer { try? FileManager.default.removeItem(at: file) }
         var p = SpeechProject(); p.inputFile = file.path; p.voiceId = "voice-a"
-        for (mode, path) in [(SpeechMode.transcription, "/v1/speech-to-text"), (.voiceChanger, "/v1/speech-to-speech/voice-a"), (.voiceIsolation, "/v1/audio-isolation"), (.forcedAlignment, "/v1/forced-alignment")] {
+        for (mode, path) in [(SpeechMode.transcription, "/v1/speech-to-text"), (.voiceChanger, "/v1/voice-changer/voice-a"), (.voiceIsolation, "/v1/audio-isolation"), (.forcedAlignment, "/v1/forced-alignment")] {
             p.mode = mode
             FixtureProtocol.reply = { r in
                 XCTAssertEqual(r.url?.path, path); XCTAssertEqual(r.httpMethod, "POST")
@@ -129,6 +187,21 @@ final class ApiTests: XCTestCase {
             _ = try await api.generate(p, model: nil)
         }
         XCTAssertEqual(FixtureProtocol.calls, 4)
+    }
+    func testScribeV3SettingsPreserveLegacyModel() async throws {
+        var project = SpeechProject()
+        project.mode = .transcription
+        project.modelId = SpeechProject.scribeV3
+        project.transcriptionNumberFormat = "digits"
+        project.secondaryLanguages = "es, FR, es"
+        XCTAssertThrowsError(try project.scribeV3Fields())
+        project.language = "en"
+        let saved = try JSONDecoder().decode(SpeechProject.self, from: JSONEncoder().encode(project))
+        XCTAssertEqual(saved, project)
+        XCTAssertEqual(try saved.scribeV3Fields().map { $0.0 + "=" + $0.1 },
+                       ["numbers_format=digits", "secondary_language_codes=es", "secondary_language_codes=fr"])
+        project.modelId = "scribe_v2"
+        XCTAssertTrue(try project.scribeV3Fields().isEmpty)
     }
     func testLosslessAudioHeaders() throws {
         let flac = Data("fLaCfixture!".utf8)

@@ -66,7 +66,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
     var availableVoices: [CatalogItem] { VoiceGroups.choices(voices, group: preferences.voiceGroup ?? "All voices", selected: project.voiceId) }
     private var supportedModels: [CatalogItem] {
         switch project.mode {
-        case .transcription: return [CatalogItem(id: "scribe_v2", name: "Scribe v2"), CatalogItem(id: "scribe_v1", name: "Scribe v1")]
+        case .transcription: return [CatalogItem(id: SpeechProject.scribeV3, name: "Scribe v3"), CatalogItem(id: "scribe_v2", name: "Scribe v2"), CatalogItem(id: "scribe_v1", name: "Scribe v1")]
         case .voiceDesign: return [CatalogItem(id: "eleven_ttv_v3", name: "Voice Design v3"), CatalogItem(id: "eleven_multilingual_ttv_v2", name: "Voice Design v2")]
         case .voiceRemix: return [CatalogItem(id: "eleven_ttv_v3", name: "Voice Remix")]
         case .voiceIsolation: return [CatalogItem(id: "audio_isolation", name: "Voice Isolation")]
@@ -168,10 +168,16 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
             var newAudio: [URL] = []
             defer { self.refreshBalance(); self.flushDrafts() }
             let api = try self.service(), start = Date()
+            var reportedCredits: [Decimal?] = []
+            func generate(_ part: SpeechProject, _ context: [String: Any]) async throws -> SpeechResult {
+                let result = try await api.generate(part, model: model, context: context)
+                if part.mode == .textToSpeech { reportedCredits.append(result.reportedCredits) }
+                return result
+            }
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             if longSpeech {
                 let stem = SpeechFiles.stem(p.filename.isEmpty ? p.text.split(whereSeparator: \.isWhitespace).prefix(8).joined(separator: " ") : p.filename)
-                newAudio = try await LongSpeech.generate(p, model: model, folder: folder, stem: stem, limit: limit, progress: { self.log($0) }, generate: { part, context in try await api.generate(part, model: model, context: context) })
+                newAudio = try await LongSpeech.generate(p, model: model, folder: folder, stem: stem, limit: limit, progress: { self.log($0) }, generate: generate)
                 for url in newAudio {
                     self.addOutput(url)
                     if self.preferences.includeDetails { try self.saveDetails(folder, stem: url.deletingPathExtension().lastPathComponent, data: ["project": try Self.object(SpeechFiles.json(p)), "assembled_wav": true, "generated_utc": ISO8601DateFormatter().string(from: Date())]) }
@@ -179,7 +185,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
             } else {
             for i in 1...total {
                 try Task.checkCancellation(); let one = Date()
-                let r = try await api.generate(p, model: model)
+                let r = try await generate(p, [:])
                 var stem = p.filename.isEmpty ? p.text.split(whereSeparator: \.isWhitespace).prefix(8).joined(separator: " ") : p.filename
                 if p.mode.needsAudio && p.filename.isEmpty { stem = URL(fileURLWithPath: p.inputFile).deletingPathExtension().lastPathComponent }
                 if total > 1 { stem += "_v\(i)" }
@@ -211,6 +217,7 @@ enum ToolKind: String, Identifiable { case voices, clone, history, dictionaries,
             }
             }
             self.log("Generation complete. Elapsed: \(String(format: "%.1f", Date().timeIntervalSince(start))) seconds.")
+            if let credits = RunCreditUsage.completionLine(reportedCredits) { self.log(credits) }
             if let app = NSApp { NSAccessibility.post(element: app.mainWindow ?? app, notification: .announcementRequested, userInfo: [.announcement: "Generation complete", .priority: NSAccessibilityPriorityLevel.high.rawValue]) }
             if self.preferences.completionSound && !(self.preferences.autoPlayGenerations == true && !newAudio.isEmpty) { NSSound(named: "Glass")?.play() }
             if self.preferences.autoPlayGenerations == true { self.playback.playSequence(newAudio, device: self.preferences.playbackDevice) }

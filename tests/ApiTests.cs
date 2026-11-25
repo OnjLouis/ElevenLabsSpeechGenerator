@@ -13,12 +13,55 @@ namespace ElevenLabsSpeechGenerator
     {
         private static int checks;
         private static void Check(bool value, string message) { if (!value) throw new Exception(message); checks++; }
+        private static void TestSubscriptionBalance()
+        {
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":37,\"character_limit\":100,\"max_credit_limit_extension\":0}").Format(DateTimeOffset.UtcNow);
+                Check(text.Contains("(63%)") && !text.Contains("Overage billing:"), "Disabled overages must not add a status line.");
+            }
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":37,\"character_limit\":100,\"max_credit_limit_extension\":25,\"can_extend_character_limit\":false,\"current_overage\":{\"amount\":\"0.00\",\"currency\":\"usd\"}}").Format(DateTimeOffset.UtcNow);
+                Check(text.Contains("Next reset: unavailable." + Environment.NewLine + "Overage billing: on.") && !text.Contains("Current overage charge"), "Enabled overages must appear after the reset, without a zero charge.");
+            }
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":0,\"character_limit\":0,\"can_extend_character_limit\":true}").Format(DateTimeOffset.UtcNow);
+                Check(!text.Contains("%") && !text.Contains("Overage billing:"), "Credit balance percentage or overage details changed.");
+            }
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":1,\"character_limit\":100000,\"max_credit_limit_extension\":\"unlimited\",\"current_overage\":{\"amount\":\"39.11\",\"currency\":\"usd\"}}").Format(DateTimeOffset.UtcNow);
+                Check(text.Contains("(99%)") && text.Contains("Overage billing: on.") && text.Contains("Current overage charge: USD "), "Credit balance percentage or overage details changed.");
+            }
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":101,\"character_limit\":100,\"max_credit_limit_extension\":\"invalid\",\"current_overage\":{\"amount\":\"39.11\"}}").Format(DateTimeOffset.UtcNow);
+                Check(text.Contains("(0%)") && text.Contains("exceeded by") && !text.Contains("Overage billing:") && !text.Contains("Current overage charge"), "Credit balance percentage or overage details changed.");
+            }
+            {
+                var text = SubscriptionBalance.Parse("{\"character_count\":20,\"character_limit\":100,\"max_credit_limit_extension\":0,\"current_overage\":{\"amount\":\"1.25\",\"currency\":\"usd\"}}").Format(DateTimeOffset.UtcNow);
+                Check(!text.Contains("Overage billing:") && text.Contains("Next reset: unavailable." + Environment.NewLine + "Current overage charge: USD "), "An existing charge must still be reported after overages are disabled.");
+            }
+        }
+
+        private static void TestRunCreditUsage()
+        {
+            var five = RunCreditUsage.Parse("5");
+            var seven = RunCreditUsage.Parse("7");
+            Check(five == 5m && seven == 7m && RunCreditUsage.Parse("1.25") == 1.25m && RunCreditUsage.Parse("0") == 0m,
+                "Valid response costs should be kept exactly.");
+            foreach (var invalid in new[] { null, "", "-2", "1,2", "4.2x", "4e2", "1.", "2\r\n1" })
+                Check(RunCreditUsage.Parse(invalid) == null, "Missing or invalid costs must not appear as charges.");
+            Check(RunCreditUsage.CompletionLine(new[] { five, seven }) == "Credits used this run: 12.", "Confirmed requests must be summed.");
+            Check(RunCreditUsage.CompletionLine(new[] { five, (decimal?)null }) == null &&
+                RunCreditUsage.CompletionLine(new decimal?[0]) == null, "An incomplete or empty run must not display a total.");
+        }
+
         public static int Run()
         {
             ServicePointManager.Expect100Continue = false;
             TestCatalogPages();
             TestHistoryMetadata();
             TestHistoryPlayback();
+            TestSubscriptionBalance();
+            TestRunCreditUsage();
             var folder = Path.Combine(AppPaths.AppFolder, "ApiFixtures"); Directory.CreateDirectory(folder);
             var p = new SpeechProject { VoiceId = "voice-a", Text = "Hello" };
             var renameVoice = new NamedItem { Id = "owned", Name = "Original", Data = new Dictionary<string, object> { { "is_owner", true }, { "category", "cloned" } } };
@@ -52,12 +95,12 @@ namespace ElevenLabsSpeechGenerator
             Check(DubbingService.LosslessExtension(Encoding.ASCII.GetBytes("fLaCfixture!")) == ".flac", "Dubbing FLAC must not be mislabeled as WAV");
             bool invalidAudio = false; try { DubbingService.LosslessExtension(Encoding.ASCII.GetBytes("not an audio")); } catch (InvalidDataException) { invalidAudio = true; } Check(invalidAudio, "Unknown dubbing audio must be rejected");
             var path = Path.Combine(folder, "speech.mp3");
-            Serve((c) => c.Generate(p, null, path, CancellationToken.None), "audio/mpeg", Encoding.ASCII.GetBytes("ID3fixture"), (request, body) =>
+            Serve(c => Check(c.Generate(p, null, path, CancellationToken.None).ReportedCredits == 21m, "Speech cost header was lost."), "audio/mpeg", Encoding.ASCII.GetBytes("ID3fixture"), (request, body) =>
             {
                 Check(request.StartsWith("POST /v1/text-to-speech/voice-a?output_format=mp3_44100_128 "), "Wrong speech endpoint");
                 var json = JsonData.Object(body); Check(JsonData.String(json, "text") == "Hello", "Speech text lost");
                 Check(((Dictionary<string, object>)json["voice_settings"]).Count == 2, "V4 settings schema changed");
-            });
+            }, reportedCreditCost: "21");
             Check(File.ReadAllText(path) == "ID3fixture", "Audio response changed");
             p.OutputFormat = "pcm_16000"; path = Path.Combine(folder, "mono.wav");
             Serve(c => c.Generate(p, null, path, CancellationToken.None), "audio/pcm", new byte[32000], null);
@@ -76,10 +119,19 @@ namespace ElevenLabsSpeechGenerator
             {
                 Check(request.Contains("/v1/speech-to-text "), "Wrong transcription endpoint"); Check(body.Contains("name=\"file\"") && body.Contains("name=\"diarize\"") && body.Contains("timestamps_granularity") && body.Contains("scribe_v2"), "Missing multipart transcription fields");
             });
+            p.ModelId = SpeechProject.ScribeV3; p.Language = "en"; p.SecondaryLanguages = "es, FR, es"; p.TranscriptionNumberFormat = "digits";
+            Serve(c => c.Generate(p, null, path, CancellationToken.None), "application/json", Encoding.UTF8.GetBytes("{\"text\":\"42\"}"), (request, body) =>
+            {
+                Check(body.Contains("name=\"model_id\"\r\n\r\nscribe_v3") && body.Contains("name=\"numbers_format\"\r\n\r\ndigits"), "Scribe v3 model or number format missing");
+                Check(body.Contains("name=\"secondary_language_codes\"\r\n\r\nes") && body.Contains("name=\"secondary_language_codes\"\r\n\r\nfr") && body.Split(new[] { "name=\"secondary_language_codes\"" }, StringSplitOptions.None).Length == 3, "Secondary languages must be separate, deduplicated multipart fields");
+            });
+            p.ModelId = "scribe_v2";
+            Serve(c => c.Generate(p, null, path, CancellationToken.None), "application/json", Encoding.UTF8.GetBytes("{\"text\":\"Transcript\"}"), (request, body) =>
+                Check(body.Contains("scribe_v2") && !body.Contains("numbers_format") && !body.Contains("secondary_language_codes"), "Saved v2 projects must never send v3-only settings"));
             p.Mode = SpeechMode.VoiceChanger; p.ModelId = "eleven_multilingual_sts_v2"; path = Path.Combine(folder, "changed.wav");
             Serve(c => c.Generate(p, null, path, CancellationToken.None), "audio/pcm", new byte[40], (request, body) =>
             {
-                Check(request.Contains("/v1/speech-to-speech/voice-a?"), "Wrong conversion endpoint"); Check(body.Contains("name=\"audio\"") && body.Contains("name=\"voice_settings\"") && body.Contains("remove_background_noise"), "Missing conversion fields");
+                Check(request.Contains("/v1/voice-changer/voice-a?"), "Wrong conversion endpoint"); Check(body.Contains("name=\"audio\"") && body.Contains("name=\"voice_settings\"") && body.Contains("remove_background_noise"), "Missing conversion fields");
             });
             p.Mode = SpeechMode.VoiceDesign; p.Text = "A warm British adult narrator."; p.ModelId = "eleven_ttv_v3";
             Serve(c => { var result = c.Generate(p, null, path, CancellationToken.None); Check(result.File == null && result.Json.Contains("previews"), "Voice design must return previews"); }, "application/json", Encoding.UTF8.GetBytes("{\"previews\":[]}"), (request, body) => Check(request.Contains("/v1/text-to-voice/design?") && JsonData.Bool(JsonData.Object(body), "auto_generate_text"), "Voice design request changed"));
@@ -244,7 +296,7 @@ namespace ElevenLabsSpeechGenerator
                 Check(list.Items.Count == 1 && ((NamedItem)list.Items[0]).Id == "nested", "History search must include later dialogue turns.");
             }
         }
-        private static void Serve(Action<SpeechClient> action, string type, byte[] payload, Action<string, string> inspect, int status = 200)
+        private static void Serve(Action<SpeechClient> action, string type, byte[] payload, Action<string, string> inspect, int status = 200, string reportedCreditCost = null)
         {
             var listener = new TcpListener(IPAddress.Loopback, 0); listener.Start(); int port = ((IPEndPoint)listener.LocalEndpoint).Port;
             var server = Task.Run(() =>
@@ -259,7 +311,8 @@ namespace ElevenLabsSpeechGenerator
                     if (length > 1024 * 1024) throw new Exception("Fixture body too large");
                     var body = new byte[length]; int read = 0; while (read < length) { int n = stream.Read(body, read, length - read); if (n == 0) throw new EndOfStreamException(); read += n; }
                     if (inspect != null) inspect(header, Encoding.UTF8.GetString(body));
-                    var response = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Fixture\r\nContent-Type: " + type + "\r\nContent-Length: " + payload.Length + "\r\nConnection: close\r\n" + (status == 302 ? "Location: https://example.invalid/\r\n" : "") + "\r\n");
+                    var costHeader = reportedCreditCost == null ? "" : "Character-Cost: " + reportedCreditCost + "\r\n";
+                    var response = Encoding.ASCII.GetBytes("HTTP/1.1 " + status + " Fixture\r\nContent-Type: " + type + "\r\nContent-Length: " + payload.Length + "\r\nConnection: close\r\n" + (status == 302 ? "Location: https://example.invalid/\r\n" : "") + costHeader + "\r\n");
                     stream.Write(response, 0, response.Length); stream.Write(payload, 0, payload.Length);
                 }
             });

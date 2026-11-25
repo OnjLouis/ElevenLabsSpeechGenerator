@@ -1,6 +1,6 @@
 import Foundation
 
-struct SpeechResult { var data: Data; var requestId: String; var contentType: String }
+struct SpeechResult { var data: Data; var requestId: String; var contentType: String; var reportedCredits: Decimal? = nil }
 final class AuthenticatedRequestDelegate: NSObject, URLSessionTaskDelegate {
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
@@ -86,14 +86,14 @@ final class SpeechService {
             var fields = ["model_id": p.modelId]
             if p.mode == .transcription { fields["diarize"] = p.diarize ? "true" : "false"; fields["tag_audio_events"] = p.audioEvents ? "true" : "false"; fields["timestamps_granularity"] = "word"; if !p.language.isEmpty { fields["language_code"] = p.language } }
             else { fields["voice_settings"] = String(data: try JSONSerialization.data(withJSONObject: p.voiceSettings(model: model)), encoding: .utf8); fields["remove_background_noise"] = p.removeNoise ? "true" : "false" }
-            return try await upload(p.mode == .transcription ? "/v1/speech-to-text" : "/v1/speech-to-speech/\(escape(p.voiceId))\(suffix)", fields: fields, files: [(p.mode == .transcription ? "file" : "audio", URL(fileURLWithPath: p.inputFile))])
+            return try await upload(p.mode == .transcription ? "/v1/speech-to-text" : "/v1/voice-changer/\(escape(p.voiceId))\(suffix)", fields: fields, files: [(p.mode == .transcription ? "file" : "audio", URL(fileURLWithPath: p.inputFile))], repeatedFields: p.scribeV3Fields())
         }
         let path = p.mode == .dialogue ? "/v1/text-to-dialogue" : p.mode == .voiceDesign ? "/v1/text-to-voice/design" : p.mode == .voiceRemix ? "/v1/text-to-voice/\(escape(p.voiceId))/remix" : "/v1/text-to-speech/\(escape(p.voiceId))"
         var body = p.body(model: model)
         if p.mode == .textToSpeech { for (key, value) in context { body[key] = value } }
         return try await send("POST", path: path + suffix, body: JSONSerialization.data(withJSONObject: body))
     }
-    func upload(_ path: String, fields: [String: String], files: [(String, URL)], progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
+    func upload(_ path: String, fields: [String: String], files: [(String, URL)], repeatedFields: [(String, String)] = [], progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
         progress?("Preparing voice samples for upload...")
         let boundary = "Speech\(UUID().uuidString)", temp = FileManager.default.temporaryDirectory.appendingPathComponent("SpeechUpload-\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: temp.path, contents: nil) else { throw SpeechError.response("Could not stage the upload.") }
@@ -101,7 +101,7 @@ final class SpeechService {
         let writer = try FileHandle(forWritingTo: temp)
         do {
             func write(_ s: String) throws { try writer.write(contentsOf: Data(s.utf8)) }
-            for (name, value) in fields { try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n") }
+            for (name, value) in Array(fields) + repeatedFields { try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n") }
             for (name, url) in files {
                 let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                 guard size > 0 && size <= 500 * 1024 * 1024 else { throw SpeechError.validation("Select a file smaller than 500 MB.") }
@@ -120,7 +120,7 @@ final class SpeechService {
     private func send(_ method: String, path: String, body: Data? = nil, upload: URL? = nil, contentType: String = "application/json", progress: (@Sendable (String) -> Void)? = nil) async throws -> SpeechResult {
         guard !key.isEmpty, !key.contains("\r"), !key.contains("\n") else { throw SpeechError.validation("Enter a valid API key in Settings first.") }
         var r = URLRequest(url: URL(string: path, relativeTo: origin)!.absoluteURL); r.httpMethod = method; r.timeoutInterval = 600
-        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.2.3", forHTTPHeaderField: "User-Agent")
+        r.setValue(key, forHTTPHeaderField: "xi-api-key"); r.setValue("ElevenLabs Speech Generator/1.3.0", forHTTPHeaderField: "User-Agent")
         if body != nil || upload != nil { r.setValue(contentType, forHTTPHeaderField: "Content-Type") }; r.httpBody = body
         let result = try await BoundedResponse(limit: 256 * 1024 * 1024, uploadProgress: progress).receive(r, upload: upload, configuration: configuration)
         try Task.checkCancellation()
@@ -130,7 +130,8 @@ final class SpeechService {
             let detail = (json?["detail"] as? [String: Any])?["message"] as? String ?? json?["detail"] as? String ?? "The service rejected this request."
             throw SpeechError.response("ElevenLabs returned HTTP \(response.statusCode): \(detail)")
         }
-        return SpeechResult(data: result.0, requestId: response.value(forHTTPHeaderField: "request-id") ?? "", contentType: response.value(forHTTPHeaderField: "Content-Type") ?? "")
+        return SpeechResult(data: result.0, requestId: response.value(forHTTPHeaderField: "request-id") ?? "", contentType: response.value(forHTTPHeaderField: "Content-Type") ?? "",
+            reportedCredits: RunCreditUsage.parse(response.value(forHTTPHeaderField: "character-cost")))
     }
     static func isolatedAudio(_ result: SpeechResult) throws -> Data {
         guard result.data.count >= 12 else { throw SpeechError.response("The isolation service returned incomplete audio.") }

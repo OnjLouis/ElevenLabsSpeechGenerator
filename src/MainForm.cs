@@ -42,6 +42,9 @@ namespace ElevenLabsSpeechGenerator
         private readonly TextBox filename = Ui.Text("Base filename", false);
         private readonly TextBox input = Ui.Text("Input audio file", false);
         private readonly TextBox language = Ui.Text("Language code, blank for automatic", false);
+        private readonly ComboBox numbers = Ui.Combo("Number format", new object[] { "Automatic", "Digits", "Words" });
+        private readonly TextBox secondaryLanguages = Ui.Text("Secondary languages", false);
+        private readonly FlowLayoutPanel scribeV3Options = new FlowLayoutPanel { AutoSize = true };
         private readonly CheckBox diarize = new CheckBox { Text = "Identify spea&kers", AutoSize = true };
         private readonly CheckBox events = new CheckBox { Text = "Include audio &events", Checked = true, AutoSize = true };
         private readonly CheckBox removeNoise = new CheckBox { Text = "Remove background noise", AutoSize = true };
@@ -89,7 +92,10 @@ namespace ElevenLabsSpeechGenerator
             input.ReadOnly = true; input.Width = 450; audioOptions.Controls.Add(input); audioOptions.Controls.Add(Ui.Button("&Choose audio...", ChooseInput)); root.Controls.Add(audioOptions, 0, 6);
             speechOptions.Controls.Add(Ui.Button("Edit dialogue...", EditDialogue)); speechOptions.Controls.Add(new Label { Text = "Lang&uage:", AutoSize = true }); speechOptions.Controls.Add(language); language.Width = 80;
             transcriptionOptions.Controls.Add(diarize); transcriptionOptions.Controls.Add(events); transcriptionOptions.Controls.Add(removeNoise);
-            var extra = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; extra.Controls.Add(speechOptions); extra.Controls.Add(transcriptionOptions); root.Controls.Add(extra, 0, 7);
+            numbers.Width = 110; secondaryLanguages.Width = 100;
+            scribeV3Options.Controls.Add(new Label { Text = "Numbe&r format:", AutoSize = true }); scribeV3Options.Controls.Add(numbers);
+            scribeV3Options.Controls.Add(new Label { Text = "Sec&ondary languages:", AutoSize = true }); scribeV3Options.Controls.Add(secondaryLanguages);
+            var extra = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; extra.Controls.Add(speechOptions); extra.Controls.Add(transcriptionOptions); extra.Controls.Add(scribeV3Options); root.Controls.Add(extra, 0, 7);
             var outputRow = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; outputRow.Controls.Add(formatLabel); outputRow.Controls.Add(format); outputRow.Controls.Add(variationsLabel); outputRow.Controls.Add(variations); outputRow.Controls.Add(fixedFormat); root.Controls.Add(outputRow, 0, 8);
             var commands = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill }; generate = new ShortcutButton { Text = "&Generate", ShortcutText = "Ctrl+Enter", AutoSize = true }; generate.Click += async delegate { await Generate(); };
             cancel = Ui.Button("Cancel generation", () => { if (operation != null) operation.Cancel(); }); cancel.Enabled = false;
@@ -98,7 +104,7 @@ namespace ElevenLabsSpeechGenerator
             commands.Controls.Add(generate); commands.Controls.Add(cancel); commands.Controls.Add(Ui.Button("&Play", PlaySelected)); commands.Controls.Add(stop); commands.Controls.Add(Ui.Button("Save a cop&y...", SaveSelected)); commands.Controls.Add(addDesign); commands.Controls.Add(progress); root.Controls.Add(commands, 0, 9);
             outputs.Height = 80; root.Controls.Add(outputs, 0, 10); Controls.Add(root); Controls.Add(menu);
             mode.SelectedIndexChanged += delegate { if (!binding && mode.SelectedIndex >= 0) { CaptureProject(); drafts[project.Mode.ToString()] = project; var selected = Modes[mode.SelectedIndex]; project = drafts.ContainsKey(selected.ToString()) ? drafts[selected.ToString()] : FreshProject(selected); Bind(); } };
-            model.SelectedIndexChanged += delegate { if (!binding) { project.ModelId = SelectedId(model); ApplyLimits(); insertTagMenu.Enabled = CanInsertSpeechTag(); } };
+            model.SelectedIndexChanged += delegate { if (!binding) { project.ModelId = SelectedId(model); scribeV3Options.Visible = project.UsesScribeV3; ApplyLimits(); insertTagMenu.Enabled = CanInsertSpeechTag(); } };
             voiceGroup.SelectedIndexChanged += delegate { if (binding) return; CaptureProject(); settings.VoiceGroup = Convert.ToString(voiceGroup.SelectedItem); FillVoices(); try { settings.Save(); } catch (Exception ex) { Ui.Result(this, "Could not save voice group", ex.Message); } };
             voice.SelectedIndexChanged += delegate { UpdateVoicePreview(); };
             prompt.TextChanged += delegate { UpdateCount(); }; outputs.DoubleClick += delegate { PlaySelected(); };
@@ -164,6 +170,8 @@ namespace ElevenLabsSpeechGenerator
             if (project.Mode != SpeechMode.Dialogue) project.Text = prompt.Text; project.Filename = filename.Text; project.InputFile = input.Text;
             if (voice.SelectedItem != null) project.VoiceId = SelectedId(voice); if (model.SelectedItem != null) project.ModelId = SelectedId(model);
             project.OutputFormat = Convert.ToString(format.SelectedItem); project.Variations = (int)variations.Value; project.Language = language.Text; project.Diarize = diarize.Checked; project.AudioEvents = events.Checked; project.RemoveNoise = removeNoise.Checked;
+            project.TranscriptionNumberFormat = numbers.SelectedIndex == 1 ? "digits" : numbers.SelectedIndex == 2 ? "words" : "";
+            project.SecondaryLanguages = secondaryLanguages.Text;
         }
         private void Bind()
         {
@@ -184,14 +192,16 @@ namespace ElevenLabsSpeechGenerator
                 prompt.Visible = project.Mode != SpeechMode.VoiceChanger && project.Mode != SpeechMode.VoiceIsolation;
                 editDialogueMenu.Enabled = operation == null && project.Mode == SpeechMode.Dialogue;
                 insertTagMenu.Enabled = CanInsertSpeechTag();
-                FillModels(); FillVoices(); ApplyLimits();
+                numbers.SelectedIndex = project.TranscriptionNumberFormat == "digits" ? 1 : project.TranscriptionNumberFormat == "words" ? 2 : 0;
+                secondaryLanguages.Text = project.SecondaryLanguages ?? "";
+                FillModels(); scribeV3Options.Visible = project.UsesScribeV3; FillVoices(); ApplyLimits();
             }
             finally { binding = false; }
         }
         private void FillModels()
         {
             var list = models.Where(x => project.Mode == SpeechMode.VoiceChanger ? JsonData.Bool(x.Data, "can_do_voice_conversion") : JsonData.Bool(x.Data, "can_do_text_to_speech")).ToList();
-            if (project.Mode == SpeechMode.Transcription) list = new List<NamedItem> { new NamedItem { Id = "scribe_v2", Name = "Scribe v2" }, new NamedItem { Id = "scribe_v1", Name = "Scribe v1" } };
+            if (project.Mode == SpeechMode.Transcription) list = new List<NamedItem> { new NamedItem { Id = SpeechProject.ScribeV3, Name = "Scribe v3" }, new NamedItem { Id = "scribe_v2", Name = "Scribe v2" }, new NamedItem { Id = "scribe_v1", Name = "Scribe v1" } };
             else if (project.Mode == SpeechMode.VoiceDesign) list = new List<NamedItem> { new NamedItem { Id = "eleven_ttv_v3", Name = "Voice Design v3" }, new NamedItem { Id = "eleven_multilingual_ttv_v2", Name = "Voice Design v2" } };
             else if (project.Mode == SpeechMode.VoiceIsolation) list = new List<NamedItem> { new NamedItem { Id = "audio_isolation", Name = "Voice Isolation" } };
             else if (project.Mode == SpeechMode.ForcedAlignment) list = new List<NamedItem> { new NamedItem { Id = "forced_alignment", Name = "Transcript Alignment" } };
@@ -302,19 +312,26 @@ namespace ElevenLabsSpeechGenerator
             await Run("Generating " + mode.Text.ToLowerInvariant(), async token =>
             {
                 Directory.CreateDirectory(folder); var timer = Stopwatch.StartNew(); var client = Client(); int total = single ? 1 : request.Variations;
+                var reportedCredits = new List<decimal?>();
+                Func<SpeechProject, Dictionary<string, object>, string, CancellationToken, ApiResult> generate = (part, context, output, cancellation) =>
+                {
+                    var generated = client.Generate(part, selectedModel, output, cancellation, context);
+                    if (part.Mode == SpeechMode.TextToSpeech) reportedCredits.Add(generated.ReportedCredits);
+                    return generated;
+                };
                 List<ApiResult> longResults = null;
                 if (longSpeech)
                 {
                     var longStem = FileNames.Stem(string.IsNullOrWhiteSpace(request.Filename) ? string.Join(" ", request.Text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries).Take(8).ToArray()) : request.Filename);
                     var updates = new Progress<string>(message => { if (!IsDisposed) Log(message); });
-                    longResults = await Task.Run(() => LongSpeech.Generate(request, selectedModel, folder, longStem, requestLimit, token, message => ((IProgress<string>)updates).Report(message), (part, context, output, cancellation) => client.Generate(part, selectedModel, output, cancellation, context)));
+                    longResults = await Task.Run(() => LongSpeech.Generate(request, selectedModel, folder, longStem, requestLimit, token, message => ((IProgress<string>)updates).Report(message), generate));
                 }
                 for (int i = 1; i <= total; i++)
                 {
                     token.ThrowIfCancellationRequested(); var stem = FileNames.Stem(string.IsNullOrWhiteSpace(request.Filename) ? string.Join(" ", request.Text.Split((char[])null, StringSplitOptions.RemoveEmptyEntries).Take(8).ToArray()) : request.Filename);
                     if ((request.Mode == SpeechMode.Transcription || request.Mode == SpeechMode.ForcedAlignment || request.Mode == SpeechMode.VoiceIsolation) && string.IsNullOrWhiteSpace(request.Filename)) stem = FileNames.Stem(Path.GetFileNameWithoutExtension(request.InputFile));
                     var path = FileNames.Next(folder, stem + (total > 1 ? "_v" + i : ""), request.Mode == SpeechMode.VoiceIsolation || request.OutputFormat.StartsWith("pcm_") ? ".wav" : ".mp3"); var one = Stopwatch.StartNew();
-                    var result = longResults == null ? await Task.Run(() => client.Generate(request, selectedModel, path, token)) : longResults[i - 1];
+                    var result = longResults == null ? await Task.Run(() => generate(request, null, path, token)) : longResults[i - 1];
                     if (request.Mode == SpeechMode.Transcription || request.Mode == SpeechMode.ForcedAlignment)
                     {
                         var data = JsonData.Object(result.Json); prompt.Text = SpeechProject.WindowsLines(request.Mode == SpeechMode.ForcedAlignment ? request.Text : JsonData.String(data, "text"));
@@ -341,7 +358,10 @@ namespace ElevenLabsSpeechGenerator
                     }
                     if (!longSpeech) Log("Request " + i + " completed in " + one.Elapsed.TotalSeconds.ToString("F1") + " seconds.");
                 }
-                Log("Generation complete. Elapsed: " + timer.Elapsed.TotalSeconds.ToString("F1") + " seconds."); progress.Text = progress.AccessibleName = "Generation complete"; progress.NotifyNameChanged(); if (settings.CompletionSound && !(settings.AutoPlayGenerations && audio.Count > 0)) SystemSounds.Asterisk.Play();
+                Log("Generation complete. Elapsed: " + timer.Elapsed.TotalSeconds.ToString("F1") + " seconds.");
+                var credits = RunCreditUsage.CompletionLine(reportedCredits);
+                if (credits != null) Log(credits);
+                progress.Text = progress.AccessibleName = "Generation complete"; progress.NotifyNameChanged(); if (settings.CompletionSound && !(settings.AutoPlayGenerations && audio.Count > 0)) SystemSounds.Asterisk.Play();
                 complete = true;
             });
             if (complete && !closeAfterCancel && !IsDisposed && settings.AutoPlayGenerations) playback.PlaySequence(audio, settings.PlaybackDevice);

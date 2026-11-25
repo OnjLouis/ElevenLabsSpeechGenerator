@@ -60,6 +60,18 @@ struct MainView: View {
     @ViewBuilder private var options: some View {
         if model.project.mode == .transcription {
             HStack { Toggle("Identify Speakers", isOn: $model.project.diarize).accessibilityHint("Label different speakers in the transcript details."); Toggle("Include Audio Events", isOn: $model.project.audioEvents).accessibilityHint("Include sounds such as laughter in the transcript."); TextField("Language code", text: $model.project.language).frame(width: 100).accessibilityHint("Leave blank to detect the language automatically.") }
+            if model.project.usesScribeV3 {
+                HStack {
+                    Picker("Number format", selection: Binding(get: { model.project.transcriptionNumberFormat ?? "" }, set: { model.project.transcriptionNumberFormat = $0 })) {
+                        Text("Automatic").tag("")
+                        Text("Digits").tag("digits")
+                        Text("Words").tag("words")
+                    }.accessibilityHint("Choose how numbers appear in the transcript.")
+                    TextField("Secondary languages", text: Binding(get: { model.project.secondaryLanguages ?? "" }, set: { model.project.secondaryLanguages = $0 }))
+                        .frame(width: 150)
+                        .accessibilityHint("List other language codes separated by commas, for example es, fr. Also enter the main language code.")
+                }
+            }
         } else if model.project.mode == .textToSpeech || model.project.mode == .voiceChanger || model.project.mode == .dialogue {
             HStack { Button("Voice Settings...") { model.openTool(.voiceSettings) }.accessibilityHint("Adjust the settings supported by the selected model."); if model.project.mode != .voiceChanger { TextField("Language code", text: $model.project.language).frame(width: 100).accessibilityHint("Optional language code; leave blank for automatic selection.") }; if model.project.mode == .voiceChanger { Toggle("Remove Background Noise", isOn: $model.project.removeNoise).accessibilityHint("Clean background noise before converting the voice.") } }
         }

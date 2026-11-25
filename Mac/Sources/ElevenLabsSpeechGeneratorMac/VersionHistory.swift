@@ -3,6 +3,10 @@ import AppKit
 @MainActor
 enum VersionHistory {
     static let text = """
+    1.3.0
+
+    Added Scribe v3 with number formatting and secondary languages. New transcription drafts use v3; existing projects keep their saved model. Voice Changer uses the supported ElevenLabs endpoint. Credit Balance shows the percentage remaining and lists active overage billing and any reported charge after the reset. Status log shows the reported credits used for a text-to-speech run, including newly generated parts. The Mac updater validates its working folders and preserves the previous app if rollback cannot safely finish.
+
     1.2.3
 
     Copy Voice ID in Voice Library copies the selected voice ID with Command+Shift+C. The ID is also listed in Details.

@@ -4,33 +4,38 @@ struct SubscriptionBalance: Decodable {
     enum CreditExtension: Decodable {
         case unlimited
         case capped(Int64)
+        case unknown
 
         init(from decoder: Decoder) throws {
             let value = try decoder.singleValueContainer()
-            if let text = try? value.decode(String.self), text == "unlimited" {
-                self = .unlimited
+            if let text = try? value.decode(String.self) {
+                if text.lowercased() == "unlimited" { self = .unlimited }
+                else if let amount = Int64(text) { self = .capped(amount) }
+                else { self = .unknown }
+            } else if let amount = try? value.decode(Int64.self) {
+                self = .capped(amount)
             } else {
-                self = .capped(try value.decode(Int64.self))
+                self = .unknown
             }
         }
 
-        var isAvailable: Bool {
+        var isEnabled: Bool? {
             switch self {
             case .unlimited: return true
-            case .capped(let amount): return amount > 0
+            case .capped(let amount): return amount >= 0 ? amount > 0 : nil
+            case .unknown: return nil
             }
         }
     }
 
     struct Overage: Decodable {
-        let amount: String
-        let currency: String
+        let amount: String?
+        let currency: String?
     }
 
     let characterCount: Int64
     let characterLimit: Int64
     let nextResetUnix: Int64?
-    let canExtendCharacterLimit: Bool?
     let maxCreditLimitExtension: CreditExtension?
     let currentOverage: Overage?
 
@@ -38,7 +43,6 @@ struct SubscriptionBalance: Decodable {
         case characterCount = "character_count"
         case characterLimit = "character_limit"
         case nextResetUnix = "next_character_count_reset_unix"
-        case canExtendCharacterLimit = "can_extend_character_limit"
         case maxCreditLimitExtension = "max_credit_limit_extension"
         case currentOverage = "current_overage"
     }
@@ -58,33 +62,45 @@ struct SubscriptionBalance: Decodable {
         let left = NumberFormatter.localizedString(from: NSNumber(value: remaining), number: .decimal)
         let limit = NumberFormatter.localizedString(from: NSNumber(value: characterLimit), number: .decimal)
         let used = NumberFormatter.localizedString(from: NSNumber(value: characterCount), number: .decimal)
-        var result = "Included allowance remaining: \(left) of \(limit) credits.\nUsed this period: \(used) credits."
+        var percent = ""
+        if characterLimit > 0 {
+            let ratio = NSDecimalNumber(decimal: 100 * Decimal(remaining) / Decimal(characterLimit))
+            let whole = NumberFormatter.localizedString(from: NSNumber(value: ratio.intValue), number: .decimal)
+            percent = " (\(whole)%)"
+        }
+        var result = "Included allowance remaining: \(left) of \(limit) credits\(percent).\nUsed this period: \(used) credits."
         if characterCount > characterLimit {
             let excess = NumberFormatter.localizedString(from: NSNumber(value: characterCount - characterLimit), number: .decimal)
             result += "\nIncluded allowance exceeded by \(excess) credits."
-            if canExtendCharacterLimit == true && maxCreditLimitExtension?.isAvailable == true {
-                result += "\nUsage-based billing is enabled"
-                if case .unlimited = maxCreditLimitExtension { result += "; no overage credit cap is reported by the API." }
-                else { result += "." }
-            }
-            if let charge = currentOverage, let amount = Decimal(string: charge.amount, locale: Locale(identifier: "en_US_POSIX")), amount >= 0 {
-                let formatter = NumberFormatter()
-                formatter.numberStyle = .decimal
-                formatter.minimumFractionDigits = 2
-                formatter.maximumFractionDigits = 2
-                if let formatted = formatter.string(from: amount as NSDecimalNumber) {
-                    result += "\nCurrent overage charge: \(charge.currency.uppercased()) \(formatted)."
-                }
-            }
-            result += "\nYour total spendable balance is not available from this check. Further generation may incur charges."
+            result += "\nYour total spendable balance is not available from this check."
         }
-        guard let nextResetUnix, nextResetUnix > 0 else { return result + "\nNext reset: unavailable." }
+        result += "\n" + resetDisplay(now: now)
+        if maxCreditLimitExtension?.isEnabled == true {
+            result += "\nOverage billing: on."
+        }
+        if let rawAmount = currentOverage?.amount,
+           let amount = Decimal(string: rawAmount, locale: Locale(identifier: "en_US_POSIX")), amount > 0,
+           let currency = currentOverage?.currency?.uppercased(),
+           currency.utf8.count == 3, currency.utf8.allSatisfy({ (65...90).contains($0) }) {
+            let formatter = NumberFormatter()
+            formatter.numberStyle = .decimal
+            formatter.minimumFractionDigits = 2
+            formatter.maximumFractionDigits = 2
+            if let formatted = formatter.string(from: amount as NSDecimalNumber) {
+                result += "\nCurrent overage charge: \(currency) \(formatted)."
+            }
+        }
+        return result
+    }
+
+    private func resetDisplay(now: Date) -> String {
+        guard let nextResetUnix, nextResetUnix > 0 else { return "Next reset: unavailable." }
         let reset = Date(timeIntervalSince1970: TimeInterval(nextResetUnix))
         let date = DateFormatter()
         date.dateStyle = .medium
         date.timeStyle = .short
         date.timeZone = .current
-        result += "\nNext reset: \(date.string(from: reset)) \(TimeZone.current.abbreviation() ?? "local time")."
+        var result = "Next reset: \(date.string(from: reset)) \(TimeZone.current.abbreviation() ?? "local time")."
         let seconds = reset.timeIntervalSince(now)
         if seconds > 0 {
             let minutes = Int(ceil(seconds / 60))

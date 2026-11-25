@@ -29,6 +29,7 @@ struct DictionaryLocator: Codable, Equatable {
 }
 
 struct SpeechProject: Codable, Equatable {
+    static let scribeV3 = "scribe_v3"
     var schemaVersion = 1
     var mode = SpeechMode.textToSpeech
     var text = "", filename = "", inputFile = "", voiceId = "", language = ""
@@ -38,12 +39,33 @@ struct SpeechProject: Codable, Equatable {
     var stability = 0.5, similarity = 0.75, style = 0.0, speed = 1.0
     var speakerBoost = true
     var diarize = false, audioEvents = true, removeNoise = false
+    var transcriptionNumberFormat: String?
+    var secondaryLanguages: String?
     var dialogue: [DialogueLine] = []
     var dictionaries: [DictionaryLocator] = []
     enum CodingKeys: String, CodingKey {
+        case transcriptionNumberFormat = "TranscriptionNumberFormat", secondaryLanguages = "SecondaryLanguages"
         case schemaVersion = "SchemaVersion", mode = "Mode", text = "Text", filename = "Filename", inputFile = "InputFile", voiceId = "VoiceId", language = "Language", modelId = "ModelId", outputFormat = "OutputFormat", variations = "Variations", stability = "Stability", similarity = "Similarity", style = "Style", speed = "Speed", speakerBoost = "SpeakerBoost", diarize = "Diarize", audioEvents = "AudioEvents", removeNoise = "RemoveNoise", dialogue = "Dialogue", dictionaries = "Dictionaries"
     }
     static let formats = ["mp3_44100_128", "mp3_44100_192", "pcm_16000", "pcm_22050", "pcm_24000", "pcm_44100", "pcm_48000"]
+    var usesScribeV3: Bool { mode == .transcription && modelId == Self.scribeV3 }
+    func scribeV3Fields() throws -> [(String, String)] {
+        guard usesScribeV3 else { return [] }
+        var fields: [(String, String)] = []
+        if let format = transcriptionNumberFormat, !format.isEmpty {
+            guard format == "digits" || format == "words" else { throw SpeechError.validation("Choose automatic, digits or words for number format.") }
+            fields.append(("numbers_format", format))
+        }
+        if let secondary = secondaryLanguages, !secondary.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let codes = secondary.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            guard !language.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, codes.allSatisfy({
+                (2...3).contains($0.utf8.count) && $0.utf8.allSatisfy { (97...122).contains($0) }
+            }) else { throw SpeechError.validation("Enter a main language code and comma-separated secondary language codes, such as es, fr.") }
+            var seen = Set<String>()
+            fields += codes.filter { seen.insert($0).inserted }.map { ("secondary_language_codes", $0) }
+        }
+        return fields
+    }
     func validateStructure() throws {
         guard schemaVersion == 1, (1...10).contains(variations), Self.formats.contains(outputFormat), [stability, similarity, style, speed].allSatisfy(\.isFinite), (0...1).contains(stability), (0...1).contains(similarity), (0...1).contains(style), (0.25...4).contains(speed), dictionaries.count <= 3 else { throw SpeechError.validation("The project contains unsupported settings.") }
         guard dictionaries.allSatisfy({ !$0.pronunciation_dictionary_id.isEmpty && !$0.version_id.isEmpty }) else { throw SpeechError.validation("A dictionary is missing its ID or version.") }
@@ -51,6 +73,7 @@ struct SpeechProject: Codable, Equatable {
     }
     func validate(limit: Int) throws {
         try validateStructure()
+        _ = try scribeV3Fields()
         guard !modelId.isEmpty else { throw SpeechError.validation("Choose a model.") }
         if mode.needsVoice && voiceId.isEmpty { throw SpeechError.validation("Choose a voice.") }
         if mode.needsAudio {

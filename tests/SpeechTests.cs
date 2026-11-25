@@ -729,7 +729,7 @@ namespace ElevenLabsSpeechGenerator
                 typeof(MainForm).GetMethod("Bind", flags).Invoke(form, null);
                 var mode = Descendants(form).OfType<System.Windows.Forms.ComboBox>().First(x => x.AccessibleName == "Mode");
                 var model = Descendants(form).OfType<System.Windows.Forms.ComboBox>().First(x => x.AccessibleName == "Model");
-                var expected = new[] { "eleven_v4", "eleven_v4", "scribe_v2", "eleven_multilingual_sts_v2", "eleven_ttv_v3", "audio_isolation", "forced_alignment", "eleven_ttv_v3" };
+                var expected = new[] { "eleven_v4", "eleven_v4", "scribe_v3", "eleven_multilingual_sts_v2", "eleven_ttv_v3", "audio_isolation", "forced_alignment", "eleven_ttv_v3" };
                 for (int i = 0; i < expected.Length; i++)
                 {
                     mode.SelectedIndex = i;

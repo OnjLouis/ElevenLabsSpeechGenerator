@@ -6,7 +6,9 @@ namespace ElevenLabsSpeechGenerator
 {
     internal static class VersionHistory
     {
-        internal static readonly string Text = "1.2.3" + Environment.NewLine + Environment.NewLine +
+        internal static readonly string Text = AppVersion.Short + Environment.NewLine + Environment.NewLine +
+            "Added Scribe v3 with number formatting and secondary languages. New transcription drafts use v3; existing projects keep their saved model. Voice Changer uses the supported ElevenLabs endpoint. Credit Balance shows the percentage remaining and lists active overage billing and any reported charge after the reset. Status log shows the reported credits used for a text-to-speech run, including newly generated parts." + Environment.NewLine + Environment.NewLine +
+            "1.2.3" + Environment.NewLine + Environment.NewLine +
             "Copy Voice ID in Voice Library copies the selected voice ID with Ctrl+Shift+C. The ID is also listed in Details." + Environment.NewLine + Environment.NewLine +
             "1.2.2" + Environment.NewLine + Environment.NewLine +
             "Generation History now displays voice names and full transcripts for current speech and dialogue recordings. Search includes the full transcript on the current page. History playback and downloads retrieve playable WAV files, including recordings originally generated as raw PCM. Windows playback errors appear above the active dialog." + Environment.NewLine + Environment.NewLine +

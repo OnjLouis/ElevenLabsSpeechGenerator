@@ -143,6 +143,8 @@ namespace ElevenLabsSpeechGenerator
             { "Refresh voices", "Reload the voices and models available to your account." },
             { "Test API key", "Check Models, Voices and balance read access. This test does not spend generation credits or prove permission for every generation mode." },
             { "Identify speakers", "Request speaker labels in transcription details." },
+            { "Number format", "Scribe v3 can write numbers as digits or words. Automatic lets ElevenLabs choose." },
+            { "Secondary languages", "For recordings with more than one language, enter the main language code and list other codes here, separated by commas. For example, es, fr." },
             { "Include audio events", "Include non-speech events such as laughter in the transcript." },
             { "Remove background noise", "Clean background noise before voice conversion." },
             { "Language code, blank for automatic", "Optional language code. Leave blank for automatic language detection." },
